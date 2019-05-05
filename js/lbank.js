@@ -1,11 +1,11 @@
 'use strict';
 
-//  ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 const Exchange = require ('./base/Exchange');
-const { ExchangeError, DDoSProtection, AuthenticationError, InvalidOrder } = require ('./base/errors');
+const { ExchangeError, DDoSProtection, AuthenticationError, InvalidOrder, NotSupported } = require ('./base/errors');
 
-//  ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 
 module.exports = class lbank extends Exchange {
     describe () {
@@ -67,6 +67,27 @@ module.exports = class lbank extends Exchange {
                         'withdraws',
                         'withdrawConfigs',
                     ],
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://api.lbank.info/ws',
+                        'wait-after-connect': 1000,
+                    },
+                },
+                'methodmap': {
+                    '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
             'fees': {
@@ -557,5 +578,131 @@ module.exports = class lbank extends Exchange {
             throw new ErrorClass (message);
         }
         return response;
+    }
+
+    _websocketOnMessage (contextId, data) {
+        let msg = JSON.parse (data);
+        let success = this.safeString (msg, 'success');
+        let channel = this.safeString (msg, 'channel');
+        if (typeof success !== 'undefined') {
+            // subscription
+            let parts = channel.split ('_');
+            let partsLen = parts.length;
+            if (partsLen > 5) {
+                if (parts[5] === 'depth') {
+                    // orderbook
+                    let symbol = this.findSymbol (parts[3] + '_' + parts[4]);
+                    // try to match with subscription
+                    let found = false;
+                    let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+                    if ('sub-nonces' in data) {
+                        let nonces = data['sub-nonces'];
+                        const keys = Object.keys (nonces);
+                        for (let i = 0; i < keys.length; i++) {
+                            found = true;
+                            let nonce = keys[i];
+                            this._cancelTimeout (nonces[nonce]);
+                            this.emit (nonce, success === 'true');
+                        }
+                        data['sub-nonces'] = {};
+                    }
+                    // if not found try unsubscription
+                    if (!found) {
+                        if ('unsub-nonces' in data) {
+                            let nonces = data['unsub-nonces'];
+                            const keys = Object.keys (nonces);
+                            for (let i = 0; i < keys.length; i++) {
+                                found = true;
+                                let nonce = keys[i];
+                                this._cancelTimeout (nonces[nonce]);
+                                this.emit (nonce, success === 'true');
+                            }
+                            data['unsub-nonces'] = {};
+                        }
+                    }
+                    this._contextSetSymbolData (contextId, 'ob', symbol, data);
+                }
+            }
+        } else {
+            let parts = channel.split ('_');
+            let partsLen = parts.length;
+            if (partsLen > 5) {
+                if (parts[5] === 'depth') {
+                    let symbol = this.findSymbol (parts[3] + '_' + parts[4]);
+                    this._websocketHandleOb (contextId, msg, symbol);
+                }
+            } else {
+                this.emit ('err', new ExchangeError (this.id + ' invalid channel ' + channel));
+            }
+        }
+    }
+
+    _websocketHandleOb (contextId, msg, symbol) {
+        let ob = this.parseOrderBook (msg);
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        data['ob'] = ob;
+        this._contextSetSymbolData (contextId, 'ob', symbol, data);
+        this.emit ('ob', symbol, this._cloneOrderBook (ob, data['limit']));
+    }
+
+    _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob') {
+            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        let id = this.market_id (symbol);
+        let payload = {
+            'event': 'addChannel',
+            'channel': 'lh_sub_spot_' + id + '_depth_60',
+        };
+        let data = this._contextGetSymbolData (contextId, event, symbol);
+        data['limit'] = this.safeInteger (params, 'limit', undefined);
+        if (!('sub-nonces' in data)) {
+            data['sub-nonces'] = {};
+        }
+        let nonceStr = nonce.toString ();
+        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonces']);
+        data['sub-nonces'][nonceStr] = handle;
+        this._contextSetSymbolData (contextId, event, symbol, data);
+        this.websocketSendJson (payload);
+    }
+
+    _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob') {
+            throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        let id = this.market_id (symbol);
+        let payload = {
+            'event': 'removeChannel',
+            'channel': 'lh_sub_spot_' + id + '_depth_60',
+            'id': nonce,
+        };
+        let data = this._contextGetSymbolData (contextId, event, symbol);
+        if (!('unsub-nonces' in data)) {
+            data['unsub-nonces'] = {};
+        }
+        let nonceStr = nonce.toString ();
+        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'unsub-nonces']);
+        data['unsub-nonces'][nonceStr] = handle;
+        this._contextSetSymbolData (contextId, event, symbol, data);
+        this.websocketSendJson (payload);
+    }
+
+    _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
+        let data = this._contextGetSymbolData (contextId, event, symbol);
+        if (key in data) {
+            let nonces = data[key];
+            if (timerNonce in nonces) {
+                this.omit (data[key], timerNonce);
+                this._contextSetSymbolData (contextId, event, symbol, data);
+            }
+        }
+    }
+
+    _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
+            return this._cloneOrderBook (data['ob'], limit);
+        }
+        return undefined;
     }
 };

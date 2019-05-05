@@ -17,6 +17,8 @@ from ccxt.base.errors import RequestTimeout
 from ccxt.base.errors import ExchangeNotAvailable
 from ccxt.base.errors import InvalidAddress
 
+# from ccxt.base.async.websocket_connection import WebsocketConnection
+
 # -----------------------------------------------------------------------------
 
 from ccxt.base.decimal_to_precision import decimal_to_precision
@@ -53,11 +55,13 @@ from requests.utils import default_user_agent
 from requests.exceptions import HTTPError, Timeout, TooManyRedirects, RequestException
 # import socket
 from ssl import SSLError
-# import sys
 import time
 import uuid
 import zlib
 from decimal import Decimal
+
+# import asyncio
+# from pyee import EventEmitter
 
 # -----------------------------------------------------------------------------
 
@@ -91,8 +95,12 @@ except ImportError:
 # -----------------------------------------------------------------------------
 
 
-class Exchange(object):
+# class Exchange(EventEmitter):
+class Exchange():
     """Base exchange class"""
+    # static variable
+    # loop = asyncio.get_event_loop()  # type: asyncio.BaseEventLoop
+
     id = None
     version = None
     certified = False
@@ -282,6 +290,10 @@ class Exchange(object):
     }
 
     def __init__(self, config={}):
+        super(Exchange, self).__init__()
+
+        # self.asyncconf = {}
+        # self.asyncConnectionPool = {}
 
         self.precision = dict() if self.precision is None else self.precision
         self.limits = dict() if self.limits is None else self.limits
@@ -314,6 +326,14 @@ class Exchange(object):
 
         if self.api:
             self.define_rest_api(self.api, 'request')
+
+        # self.async_reset_context()
+        # # snake renaming methods
+        # if 'methodmap' in self.asyncconf:
+        #     def camel2snake(name):
+        #         return name[0].lower() + re.sub(r'(?!^)[A-Z]', lambda x: '_' + x.group(0).lower(), name[1:])
+        #     for m in self.asyncconf['methodmap']:
+        #         self.asyncconf['methodmap'][m] = camel2snake(self.asyncconf['methodmap'][m])
 
         if self.markets:
             self.set_markets(self.markets)

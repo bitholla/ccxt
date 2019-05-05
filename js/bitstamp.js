@@ -164,6 +164,33 @@ module.exports = class bitstamp extends Exchange {
                     'Ensure this value has at least': InvalidAddress, // Ensure this value has at least 25 characters (it has 4).
                 },
             },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'pusher',
+                        'baseurl': 'wss://ws-mt1.pusher.com:443/app/de504dc5763aeef9ff52',
+                    },
+                },
+                'methodmap': {
+                    '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
+            },
         });
     }
 
@@ -1049,5 +1076,175 @@ module.exports = class bitstamp extends Exchange {
             }
             throw new ExchangeError (feedback);
         }
+    }
+
+    _websocketOnMessage (contextId, data) {
+        let msg = JSON.parse (data);
+        // console.log(data);
+        let evt = this.safeString (msg, 'event');
+        if (evt === 'subscription_succeeded') {
+            this._websocketHandleSubscription (contextId, msg);
+        } else if (evt === 'data') {
+            let chan = this.safeString (msg, 'channel');
+            if (chan.indexOf ('order_book') >= 0) {
+                this._websocketHandleOrderbook (contextId, msg);
+            }
+        } else if (evt === 'trade') {
+            this._websocketHandleTrade (contextId, msg);
+        }
+    }
+
+    _websocketHandleOrderbook (contextId, msg) {
+        let chan = this.safeString (msg, 'channel');
+        let parts = chan.split ('_');
+        let id = 'btcusd';
+        if (parts.length > 2) {
+            id = parts[2];
+        }
+        let symbol = this.findSymbol (id);
+        let data = this.safeValue (msg, 'data');
+        let timestamp = this.safeInteger (data, 'timestamp');
+        let ob = this.parseOrderBook (data, timestamp * 1000);
+        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        symbolData['ob'] = ob;
+        this.emit ('ob', symbol, this._cloneOrderBook (ob, symbolData['limit']));
+        this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+    }
+
+    _websocketParseTrade (data, symbol) {
+        let timestamp_ms = parseInt (this.safeInteger (data, 'microtimestamp') / 1000);
+        let side = this.safeString (data, 'type');
+        if (side !== undefined) {
+            side = (side === '1') ? 'sell' : 'buy';
+        }
+        return {
+            'id': this.safeString (data, 'id'),
+            'info': data,
+            'timestamp': timestamp_ms,
+            'datetime': this.iso8601 (timestamp_ms),
+            'symbol': symbol,
+            'type': undefined,
+            'side': side,
+            'price': this.safeFloat (data, 'price'),
+            'amount': this.safeFloat (data, 'amount'),
+        };
+    }
+
+    _websocketHandleTrade (contextId, msg) {
+        // msg example: {'event': 'trade', 'channel': 'live_trades_btceur', 'data': {'microtimestamp': '1551914592860723', 'amount': 0.06388482, 'buy_order_id': 2967695978, 'sell_order_id': 2967695603, 'amount_str': '0.06388482', 'price_str': '3407.43', 'timestamp': '1551914592', 'price': 3407.43, 'type': 0, 'id': 83631877}}
+        let chan = this.safeString (msg, 'channel');
+        let parts = chan.split ('_');
+        let id = 'btcusd';
+        if (parts.length > 2) {
+            id = parts[2];
+        }
+        let symbol = this.findSymbol (id);
+        let data = this.safeValue (msg, 'data');
+        let trade = this._websocketParseTrade (data, symbol);
+        this.emit ('trade', symbol, trade);
+    }
+
+    _websocketHandleSubscription (contextId, msg) {
+        let chan = this.safeString (msg, 'channel');
+        let event = undefined;
+        if (chan.indexOf ('order_book') >= 0) {
+            event = 'ob';
+        } else if (chan.indexOf ('live_trades') >= 0) {
+            event = 'trade';
+        } else {
+            event = undefined;
+        }
+        if (typeof event !== 'undefined') {
+            let parts = chan.split ('_');
+            let id = 'btcusd';
+            if (parts.length > 2) {
+                id = parts[2];
+            }
+            let symbol = this.findSymbol (id);
+            let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+            if ('sub-nonces' in symbolData) {
+                let nonces = symbolData['sub-nonces'];
+                const keys = Object.keys (nonces);
+                for (let i = 0; i < keys.length; i++) {
+                    let nonce = keys[i];
+                    this._cancelTimeout (nonces[nonce]);
+                    this.emit (nonce, true);
+                }
+                symbolData['sub-nonces'] = {};
+                this._contextSetSymbolData (contextId, event, symbol, symbolData);
+            }
+        }
+    }
+
+    _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob' && event !== 'trade') {
+            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        // save nonce for subscription response
+        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        if (!('sub-nonces' in symbolData)) {
+            symbolData['sub-nonces'] = {};
+        }
+        symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
+        let nonceStr = nonce.toString ();
+        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        let channel = undefined;
+        symbolData['sub-nonces'][nonceStr] = handle;
+        this._contextSetSymbolData (contextId, event, symbol, symbolData);
+        // send request
+        if (event === 'ob') {
+            channel = 'order_book';
+        } else if (event === 'trade') {
+            channel = 'live_trades';
+        }
+        if (symbol !== 'BTC/USD') {
+            const id = this.marketId (symbol);
+            channel = channel + '_' + id;
+        }
+        this.websocketSendJson ({
+            'event': 'subscribe',
+            'channel': channel,
+        }, contextId);
+    }
+
+    _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
+        let channel = undefined;
+        if (event !== 'ob' && event !== 'trade') {
+            throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        if (event === 'ob') {
+            channel = 'order_book';
+        } else if (event === 'trade') {
+            channel = 'live_trades';
+        }
+        if (symbol !== 'BTC/USD') {
+            const id = this.marketId (symbol);
+            channel = channel + '_' + id;
+        }
+        this.websocketSendJson ({
+            'event': 'unsubscribe',
+            'channel': channel,
+        });
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
+    }
+
+    _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
+        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        if (key in symbolData) {
+            let nonces = symbolData[key];
+            if (timerNonce in nonces) {
+                this.omit (symbolData[key], timerNonce);
+                this._contextSetSymbolData (contextId, event, symbol, symbolData);
+            }
+        }
+    }
+
+    _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
+            return this._cloneOrderBook (data['ob'], limit);
+        }
+        return undefined;
     }
 };

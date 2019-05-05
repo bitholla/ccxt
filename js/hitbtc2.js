@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 const hitbtc = require ('./hitbtc');
-const { PermissionDenied, ExchangeError, ExchangeNotAvailable, OrderNotFound, InsufficientFunds, InvalidOrder } = require ('./base/errors');
+const { PermissionDenied, ExchangeError, ExchangeNotAvailable, OrderNotFound, InsufficientFunds, InvalidOrder, NotSupported } = require ('./base/errors');
 const { TRUNCATE, DECIMAL_PLACES } = require ('./base/functions/number');
 // ---------------------------------------------------------------------------
 
@@ -549,6 +549,23 @@ module.exports = class hitbtc2 extends hitbtc {
                 '2020': InvalidOrder, // "Price not a valid number"
                 '20002': OrderNotFound, // canceling non-existent order
                 '20001': InsufficientFunds,
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://api.hitbtc.com/api/2/ws',
+                    },
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
             },
         });
     }
@@ -1421,5 +1438,150 @@ module.exports = class hitbtc2 extends hitbtc {
             }
             throw new ExchangeError (feedback);
         }
+    }
+
+    _websocketOnMessage (contextId, data) {
+        let msg = JSON.parse (data);
+        // TODO: if (msg.error) error handle
+        let method = this.safeString (msg, 'method');
+        if (typeof method !== 'undefined') {
+            if (method === 'snapshotOrderbook') {
+                // const orderbook = msg.params;
+                // :parse orderbook
+                // console.log('orderbook>>>', orderbook);
+                this._websocketHandleSnapshotOrderbook (contextId, msg);
+            } else if (method === 'updateOrderbook') {
+                // const orderbook = msg.params;
+                // TODO:update orderbook
+                // console.log('update orderbook>>>', orderbook);
+                this._websocketHandleUpdateOrderbook (contextId, msg);
+            }
+        }
+    }
+
+    _websocketHandleSnapshotOrderbook (contextId, data) {
+        const timestamp = undefined;
+        const obdata = this.safeValue (data, 'params');
+        const rawsymbol = this.safeValue (obdata, 'symbol');
+        let market = this.markets_by_id[rawsymbol];
+        const symbol = market['symbol'];
+        // :parse orderbook
+        let ob = this.parseOrderBook (obdata, timestamp, 'bid', 'ask', 'price', 'size');
+        // console.log('parsed',ob);
+        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        symbolData['ob'] = ob;
+        symbolData['rawData'] = obdata;
+        this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+        this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit']));
+    }
+
+    _websocketIsZeroSize (size) {
+        // hitbtc - their doc is really bad, how many 0 will it have?
+        return size === '0' || size === '0.0' || size === '0.00' || size === '0.000' || size === '0.0000';
+    }
+
+    _websocketUpdateOrder (items, updates) {
+        let newitems = [];
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            let removeItem = false;
+            for (let j = 0; j < updates.length; j++) {
+                const o = updates[j];
+                if (o['price'] === item['price']) {
+                    if (this._websocketIsZeroSize (o['size'])) {
+                        // remove size === 0
+                        removeItem = true;
+                        // console.log ('htbtc2 remove order',item,o);
+                    } else {
+                        // update price
+                        // console.log ('htbtc2 update order',item,o);
+                        item['size'] = o['size'];
+                    }
+                }
+            }
+            if (!removeItem) {
+                newitems.push (item);
+            }
+        }
+        return newitems;
+    }
+
+    _websocketHandleUpdateOrderbook (contextId, data) {
+        const timestamp = undefined;
+        const obdata = this.safeValue (data, 'params');
+        const rawsymbol = this.safeValue (obdata, 'symbol');
+        let market = this.markets_by_id[rawsymbol];
+        const symbol = market['symbol'];
+        let symbolData = this._contextGetSymbolData (
+            contextId,
+            'ob',
+            symbol
+        );
+        // :get updated last raw ob
+        const rawData = symbolData['rawData'];
+        // console.log('>>>>>>get last raw',rawData);
+        // :update,remove size = 0,check sequence
+        rawData['ask'] = this._websocketUpdateOrder (rawData['ask'], obdata['ask']);
+        rawData['bid'] = this._websocketUpdateOrder (rawData['bid'], obdata['bid']);
+        // console.log('updated raw',rawData,obdata);
+        // :parse orderbook
+        let ob = this.parseOrderBook (rawData, timestamp, 'bid', 'ask', 'price', 'size');
+        // console.log('parsed',ob);
+        // :update last raw ob
+        symbolData['ob'] = ob;
+        symbolData['rawData'] = rawData;
+        this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+        this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit']));
+    }
+
+    _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob') {
+            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        let data = this._contextGetSymbolData (contextId, event, symbol);
+        // depth from 0 to 5
+        // see https://github.com/huobiapi/API_Docs/wiki/WS_api_reference#%E8%AE%A2%E9%98%85-market-depth-%E6%95%B0%E6%8D%AE-marketsymboldepthtype
+        data['depth'] = this.safeInteger (params, 'depth', '50');
+        data['limit'] = this.safeInteger (params, 'limit', 200);
+        // it is not limit
+        // data['limit'] = params['depth'];
+        this._contextSetSymbolData (contextId, event, symbol, data);
+        const rawsymbol = this.marketId (symbol);
+        const sendJson = {
+            'method': 'subscribeOrderbook',
+            'params': {
+                'symbol': rawsymbol,
+            },
+            'id': rawsymbol,
+        };
+        this.websocketSendJson (sendJson);
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
+    }
+
+    _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob') {
+            throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        params['depth'] = params['depth'] || '50';
+        const rawsymbol = this.marketId (symbol);
+        const sendJson = {
+            'method': 'unsubscribeOrderbook',
+            'params': {
+                'symbol': rawsymbol,
+            },
+            'id': rawsymbol,
+        };
+        this.websocketSendJson (sendJson);
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
+    }
+
+    _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if ('ob' in data && typeof data['ob'] !== 'undefined') {
+            return this._cloneOrderBook (data['ob'], limit);
+        }
+        return undefined;
     }
 };

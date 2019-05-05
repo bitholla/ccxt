@@ -3,7 +3,7 @@
 //  ---------------------------------------------------------------------------
 
 const Exchange = require ('./base/Exchange');
-const { ExchangeError, ExchangeNotAvailable, RequestTimeout, AuthenticationError, PermissionDenied, DDoSProtection, InsufficientFunds, OrderNotFound, OrderNotCached, InvalidOrder, AccountSuspended, CancelPending, InvalidNonce } = require ('./base/errors');
+const { ExchangeError, ExchangeNotAvailable, RequestTimeout, AuthenticationError, PermissionDenied, DDoSProtection, InsufficientFunds, OrderNotFound, OrderNotCached, InvalidOrder, AccountSuspended, CancelPending, InvalidNonce, NotSupported } = require ('./base/errors');
 
 //  ---------------------------------------------------------------------------
 
@@ -101,6 +101,30 @@ module.exports = class poloniex extends Exchange {
                         'transferBalance',
                         'withdraw',
                     ],
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://api2.poloniex.com',
+                    },
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
             // Fees are tier-based. More info: https://poloniex.com/fees/
@@ -249,6 +273,7 @@ module.exports = class poloniex extends Exchange {
             });
             result.push (this.extend (this.fees['trading'], {
                 'id': id,
+                'id2': market['id'].toString (),
                 'symbol': symbol,
                 'baseId': baseId,
                 'quoteId': quoteId,
@@ -1301,5 +1326,316 @@ module.exports = class poloniex extends Exchange {
             }
             throw new ExchangeError (feedback); // unknown message
         }
+    }
+
+    _websocketGenerateUrlStream (events, options) {
+        return options['url'];
+    }
+
+    _websocketMarketId (symbol) {
+        return this.marketId (symbol).toLowerCase ();
+    }
+
+    _websocketOnOpen (contextId, websocketOptions) { // eslint-disable-line no-unused-vars
+        let symbolIds = {};
+        this._contextSet (contextId, 'symbolids', symbolIds);
+    }
+
+    _websocketOnMessage (contextId, data) {
+        let msg = JSON.parse (data);
+        let channelId = msg[0];
+        if (channelId === 1000) {
+            // account notification (beta)
+            console.log ('notification');
+        } else if (channelId === 1002) {
+            // ticker data
+            console.log ('ticker');
+        } else if (channelId === 1003) {
+            // 24 hour exchange volume
+            console.log ('24 hour exchange volume');
+        } else if (channelId === 1010) {
+            console.log (this.id + '._websocketOnMessage() heartbeat ' + data);
+        } else {
+            // if channelId is not one of the above, check if it is a marketId
+            let symbolsIds = this._contextGet (contextId, 'symbolids');
+            let channelIdStr = channelId.toString ();
+            if (channelIdStr in symbolsIds) {
+                // both 'ob' and 'trade' are handled by the same execution branch
+                // as on poloniex they are part of the same endpoint
+                let symbol = symbolsIds[channelIdStr];
+                this._websocketHandleOb (contextId, symbol, msg);
+            } else {
+                // Some error occured
+                this.emit ('err', new ExchangeError (this.id + '._websocketOnMessage() failed to get symbol for channelId: ' + channelIdStr));
+                this.websocketClose (contextId);
+            }
+        }
+    }
+
+    _websocketParseTrade (trade, symbol) {
+        // Websocket trade format different than REST trade format
+        let id = trade[1];
+        let side = (trade[2] === 1) ? 'buy' : 'sell';
+        let price = parseFloat (trade[3]);
+        let amount = parseFloat (trade[4]);
+        let timestamp = trade[5] * 1000; // ms resolution
+        return {
+            'id': id,
+            'info': trade,
+            'timestamp': timestamp,
+            'datetime': this.iso8601 (timestamp),
+            'symbol': symbol,
+            'type': undefined,
+            'side': side,
+            'price': price,
+            'amount': amount,
+        };
+    }
+
+    _websocketHandleOb (contextId, symbol, data) {
+        // Poloniex calls this Price Aggregated Book
+        // let channelId = data[0];
+        let sequenceNumber = data[1];
+        if (data.length > 2) {
+            let orderbook = data[2];
+            // let symbol = this.findSymbol (channelId.toString ());
+            // Check if this is the first response which contains full current orderbook
+            if (orderbook[0][0] === 'i') {
+                if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
+                    return;
+                }
+                let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+                // let currencyPair = orderbook[0][1]['currencyPair'];
+                let fullOrderbook = orderbook[0][1]['orderBook'];
+                let asks = [];
+                let bids = [];
+                let keys = [];
+                let i = 0;
+                keys = Object.keys (fullOrderbook[0]);
+                for (i = 0; i < keys.length; i++) {
+                    asks.push ([parseFloat (keys[i]), parseFloat (fullOrderbook[0][keys[i]])]);
+                }
+                keys = Object.keys (fullOrderbook[1]);
+                for (i = 0; i < keys.length; i++) {
+                    bids.push ([parseFloat (keys[i]), parseFloat (fullOrderbook[1][keys[i]])]);
+                }
+                fullOrderbook = {
+                    'asks': asks,
+                    'bids': bids,
+                    'isFrozen': 0,
+                    'seq': sequenceNumber,
+                };
+                // I decided not to push the initial orderbook to cache.
+                // This way is less consistent but I think it's easier.
+                fullOrderbook = this.parseOrderBook (fullOrderbook);
+                fullOrderbook = this._cloneOrderBook (fullOrderbook, symbolData['limit']);
+                fullOrderbook['obLastSequenceNumber'] = sequenceNumber;
+                symbolData['ob'] = fullOrderbook;
+                this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+                this.emit ('ob', symbol, symbolData['ob']);
+            } else {
+                let order = undefined;
+                let orderbookDelta = {
+                    'asks': [],
+                    'bids': [],
+                    'seq': sequenceNumber,
+                };
+                let price = 0.0;
+                let amount = 0.0;
+                let i = 0;
+                for (i = 0; i < orderbook.length; i++) {
+                    order = orderbook[i];
+                    if (order[0] === 'o') {
+                        price = parseFloat (order[2]);
+                        amount = parseFloat (order[3]);
+                        if (order[1] === 0) {
+                            // sell order
+                            orderbookDelta['asks'].push ([price, amount]);
+                        } else if (order[1] === 1) {
+                            // buy order
+                            orderbookDelta['bids'].push ([price, amount]);
+                        } else {
+                            // error
+                            this.emit ('err', new ExchangeError (this.id + '._websocketHandleOb() unknown value in buy/sell field. Expected 0 or 1 but got: ' + order[1]));
+                            this.websocketClose (contextId);
+                            return;
+                        }
+                    } else if (order[0] === 't') {
+                        // this is not an order but a trade
+                        if (this._contextIsSubscribed (contextId, 'trade', symbol)) {
+                            let trade = this._websocketParseTrade (order, symbol);
+                            this.emit ('trade', symbol, trade);
+                        } else {
+                            console.log (this.id + '._websocketHandleOb() skipping trade.');
+                        }
+                        continue;
+                    } else {
+                        // unknown value
+                        this.emit ('err', new ExchangeError (this.id + '._websocketHandleOb() unknown value in order/trade field. Expected \'o\' or \'t\' but got: ' + order[0]));
+                        this.websocketClose (contextId);
+                        return;
+                    }
+                }
+                if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
+                    return;
+                }
+                // Add to cache
+                orderbookDelta = this.parseOrderBook (orderbookDelta);
+                let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+                if (typeof (symbolData['obDeltaCache']) === 'undefined') {
+                    // This check is necessary because the obDeltaCache will be deleted on a call to fetchOrderBook()
+                    symbolData['obDeltaCache'] = {}; // make empty cache
+                    symbolData['obDeltaCacheSize'] = 0; // counting number of cached deltas
+                }
+                symbolData['obDeltaCacheSize'] += 1;
+                let sequenceNumberStr = sequenceNumber.toString ();
+                symbolData['obDeltaCache'][sequenceNumberStr] = orderbookDelta;
+                // Schedule call to _websocketOrderBookDeltaCache()
+                this._websocketHandleObDeltaCache (contextId, symbol);
+                this.emit ('ob', symbol, symbolData['ob']);
+            }
+        }
+    }
+
+    _websocketHandleObDeltaCache (contextId, symbol) {
+        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        // Handle out-of-order sequenceNumber
+        // To avoid a memory leak, we must put a maximum on the size of obDeltaCache.
+        // When this maximum is reached, we accept that we have lost some orderbook updates.
+        // In this case we must fetch a new orderbook.
+        // Alternatively, we could apply all cached deltas and keep going.
+        if (symbolData['obDeltaCacheSize'] > symbolData['obDeltaCacheSizeMax']) {
+            symbolData['ob'] = this.fetchOrderBook (symbol, symbolData['limit']);
+            // delete symbolData['obDeltaCache'];
+            symbolData['obDeltaCache'] = undefined;
+            symbolData['obDeltaCacheSize'] = 0;
+            this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+            return;
+        }
+        if (symbolData['obDeltaCacheSize'] === 0) {
+            this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+            return;
+        }
+        // if the cache exists
+        // check if the next sequenceNumber is in the cache
+        let fullOrderbook = symbolData['ob'];
+        let lastSequenceNumber = fullOrderbook['obLastSequenceNumber'];
+        let cachedSequenceNumber = lastSequenceNumber + 1;
+        let cachedSequenceNumberStr = cachedSequenceNumber.toString ();
+        let orderbookDelta = symbolData['obDeltaCache'][cachedSequenceNumberStr];
+        let continueBool = typeof orderbookDelta !== 'undefined';
+        // While loop is not transpiled properly
+        // while (continueBool) {
+        let nkeys = symbolData['obDeltaCacheSize'];
+        let i = 0;
+        for (i = 0; i < nkeys; i++) {
+            if (!continueBool) {
+                break;
+            }
+            symbolData['obDeltaCache'][cachedSequenceNumberStr] = undefined;
+            fullOrderbook = this.mergeOrderBookDelta (symbolData['ob'], orderbookDelta);
+            fullOrderbook = this._cloneOrderBook (fullOrderbook, symbolData['limit']);
+            fullOrderbook['obLastSequenceNumber'] = cachedSequenceNumber;
+            symbolData['ob'] = fullOrderbook;
+            cachedSequenceNumber += 1;
+            orderbookDelta = symbolData['obDeltaCache'][cachedSequenceNumberStr];
+            continueBool = typeof orderbookDelta !== 'undefined';
+            symbolData['obDeltaCacheSize'] -= 1;
+        }
+        this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+    }
+
+    _websocketSubscribeOb (contextId, event, symbol, nonce, params = {}) {
+        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
+        symbolData['obDeltaCache'] = undefined;
+        symbolData['obDeltaCacheSize'] = 0;
+        symbolData['obDeltaCacheSizeMax'] = this.safeInteger (params, 'obDeltaCacheSizeMax', 10);
+        this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+        // get symbol id2
+        // let market = this.marketId (symbol);
+        if (!this._contextIsSubscribed (contextId, 'trade', symbol)) {
+            let market = this.findMarket (symbol);
+            let symbolsIds = this._contextGet (contextId, 'symbolids');
+            symbolsIds[market['id2']] = symbol;
+            this._contextSet (contextId, 'symbolids', symbolsIds);
+            let payload = {
+                'command': 'subscribe',
+                'channel': market['id'],
+            };
+            this.websocketSendJson (payload);
+        }
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
+    }
+
+    _websocketSubscribeTrade (contextId, event, symbol, nonce, params = {}) {
+        if (!this._contextIsSubscribed (contextId, 'ob', symbol)) {
+            let market = this.findMarket (symbol);
+            let symbolsIds = this._contextGet (contextId, 'symbolids');
+            symbolsIds[market['id2']] = symbol;
+            this._contextSet (contextId, 'symbolids', symbolsIds);
+            let payload = {
+                'command': 'subscribe',
+                'channel': market['id'],
+            };
+            this.websocketSendJson (payload);
+        }
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
+    }
+
+    _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event === 'ob') {
+            this._websocketSubscribeOb (contextId, event, symbol, nonce, params);
+        } else if (event === 'trade') {
+            this._websocketSubscribeTrade (contextId, event, symbol, nonce, params);
+        } else {
+            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+    }
+
+    _websocketUnsubscribeOb (conxid, event, symbol, nonce, params) {
+        if (!this._contextIsSubscribed (conxid, 'trade', symbol)) {
+            let market = this.marketId (symbol);
+            let payload = {
+                'command': 'unsubscribe',
+                'channel': market,
+            };
+            this.websocketSendJson (payload);
+        }
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
+    }
+
+    _websocketUnsubscribeTrade (conxid, event, symbol, nonce, params) {
+        if (!this._contextIsSubscribed (conxid, 'ob', symbol)) {
+            let market = this.marketId (symbol);
+            let payload = {
+                'command': 'unsubscribe',
+                'channel': market,
+            };
+            this.websocketSendJson (payload);
+        }
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
+    }
+
+    _websocketUnsubscribe (conxid, event, symbol, nonce, params) {
+        if (event === 'ob') {
+            this._websocketUnsubscribeOb (conxid, event, symbol, nonce, params);
+        } else if (event === 'trade') {
+            this._websocketUnsubscribeTrade (conxid, event, symbol, nonce, params);
+        } else {
+            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+    }
+
+    _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
+            return this._cloneOrderBook (data['ob'], limit);
+        }
+        return undefined;
     }
 };
