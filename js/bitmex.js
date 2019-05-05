@@ -1186,8 +1186,8 @@ module.exports = class bitmex extends Exchange {
         let data = this.safeValue (msg, 'data');
         let symbol = this.safeString (data[0], 'symbol');
         let dbids = this._contextGet (contextId, 'dbids');
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         symbol = this.findSymbol (symbol);
+        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
         if (action === 'partial') {
             let ob = {
                 'bids': [],
