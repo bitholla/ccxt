@@ -1077,7 +1077,7 @@ module.exports = class bitmex extends Exchange {
         } else if (typeof unsubscribe !== 'undefined') {
             this._websocketHandleUnsubscription (contextId, msg);
         } else if (typeof table !== 'undefined') {
-            if (table === 'orderBookL2') {
+            if (table === 'orderBookL2_25') {
                 this._websocketHandleOb (contextId, msg);
             } else if (table === 'trade') {
                 this._websocketHandleTrade (contextId, msg);
@@ -1104,7 +1104,7 @@ module.exports = class bitmex extends Exchange {
         let partsLen = parts.length;
         let event = undefined;
         if (partsLen === 2) {
-            if (parts[0] === 'orderBookL2') {
+            if (parts[0] === 'orderBookL2_25') {
                 event = 'ob';
             } else if (parts[0] === 'trade') {
                 event = 'trade';
@@ -1136,7 +1136,7 @@ module.exports = class bitmex extends Exchange {
         let partsLen = parts.length;
         let event = undefined;
         if (partsLen === 2) {
-            if (parts[0] === 'orderBookL2') {
+            if (parts[0] === 'orderBookL2_25') {
                 event = 'ob';
             } else if (parts[0] === 'trade') {
                 event = 'trade';
@@ -1272,7 +1272,7 @@ module.exports = class bitmex extends Exchange {
         if (event === 'ob') {
             payload = {
                 'op': 'subscribe',
-                'args': ['orderBookL2:' + id],
+                'args': ['orderBookL2_25:' + id],
             };
         } else if (event === 'trade') {
             payload = {
@@ -1301,7 +1301,7 @@ module.exports = class bitmex extends Exchange {
         if (event === 'ob') {
             payload = {
                 'op': 'unsubscribe',
-                'args': ['orderBookL2:' + id],
+                'args': ['orderBookL2_25:' + id],
             };
         } else if (event === 'trade') {
             payload = {
