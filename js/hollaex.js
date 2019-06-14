@@ -15,7 +15,6 @@ module.exports = class hollaex extends Exchange {
             'countries': [ 'KR' ],
             'rateLimit': 333,
             'version': 'v0',
-            'verbose': true,
             'has': {
                 'CORS': false,
                 'fetchMarkets': true,
@@ -344,13 +343,12 @@ module.exports = class hollaex extends Exchange {
         let datetime = this.safeString (order, 'created_at');
         let timestamp = this.parse8601 (datetime);
         let lastTradeTimestamp = undefined;
-        let status = undefined;
+        let status = 'open';
         let type = this.safeString (order, 'type');
         let side = this.safeString (order, 'side');
         let price = this.safeFloat (order, 'price');
         let amount = this.safeFloat (order, 'size');
         let filled = this.safeFloat (order, 'filled');
-        // let remaining = amount - filled;
         let remaining = undefined;
         let cost = filled * price;
         let trades = undefined;
