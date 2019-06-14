@@ -46397,7 +46397,7 @@ module.exports = class hollaex extends Exchange {
                 'withdraw': true,
             },
             'urls': {
-                'logo': 'https://user-images.githubusercontent.com/10441291/59324510-26bb8380-8d1a-11e9-91a5-5c89402b6f0c.png',
+                'logo': 'https://user-images.githubusercontent.com/10441291/59487066-8058b500-8eb6-11e9-82fd-c9157b18c2d8.jpg',
                 'api': 'https://api.hollaex.com',
                 'www': 'https://hollaex.com',
                 'doc': 'https://apidocs.hollaex.com',
@@ -46447,7 +46447,7 @@ module.exports = class hollaex extends Exchange {
     }
 
     async fetchMarkets (params = {}) {
-        let response = await this.publicGetConstant (this.extend (params));
+        let response = await this.publicGetConstant ();
         let markets = this.safeValue (response, 'pairs');
         let keys = Object.keys (markets);
         let result = [];
