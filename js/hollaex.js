@@ -65,6 +65,12 @@ module.exports = class hollaex extends Exchange {
                     ],
                 },
             },
+            'fees': {
+                'trading': {
+                    'tierBased': true,
+                    'percentage': true,
+                },
+            },
             'exceptions': {
                 'Order not found': OrderNotFound,
                 '400': BadRequest,
