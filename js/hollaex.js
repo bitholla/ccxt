@@ -96,11 +96,6 @@ module.exports = class hollaex extends Exchange {
             let quote = this.commonCurrencyCode (quoteId).toUpperCase ();
             let symbol = base + '/' + quote;
             let active = true;
-            let precision = {
-                'cost': undefined,
-                'price': undefined,
-                'amount': undefined,
-            };
             let limits = {
                 'amount': {
                     'min': market['min_size'],
@@ -111,6 +106,23 @@ module.exports = class hollaex extends Exchange {
                     'max': market['max_price'],
                 },
                 'cost': undefined,
+            };
+            let tickSize = market['tick_size'];
+            let pricePrecision = 0;
+            for (let i = 1; i >= 0 && tickSize < 1; i++) {
+                tickSize = tickSize * 10;
+                pricePrecision = i;
+            }
+            let minAmount = market['min_size'];
+            let amountPrecision = 0;
+            for (let i = 1; i >= 0 && minAmount < 1; i++) {
+                minAmount = minAmount * 10;
+                amountPrecision = i;
+            }
+            let precision = {
+                'cost': undefined,
+                'price': pricePrecision,
+                'amount': amountPrecision,
             };
             let info = market;
             let entry = {
