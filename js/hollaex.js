@@ -57,7 +57,7 @@ module.exports = class hollaex extends Exchange {
                         'user/orders/{orderId}',
                     ],
                     'post': [
-                        'user/request-Withdrawal',
+                        'user/request-withdrawal',
                         'order',
                     ],
                     'delete': [
