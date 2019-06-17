@@ -398,7 +398,7 @@ module.exports = class hollaex extends Exchange {
             'price': price,
         };
         let response = await this.privatePostOrder (this.extend (order, params));
-        // response['created_at'] = this.iso8601 (this.milliseconds ());
+        response['created_at'] = this.iso8601 (this.milliseconds ());
         return this.parseOrder (response, market);
     }
 
