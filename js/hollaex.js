@@ -361,14 +361,19 @@ module.exports = class hollaex extends Exchange {
         let datetime = this.safeString (order, 'created_at');
         let timestamp = this.parse8601 (datetime);
         let lastTradeTimestamp = undefined;
-        let status = 'open';
         let type = this.safeString (order, 'type');
         let side = this.safeString (order, 'side');
         let price = this.safeFloat (order, 'price');
         let amount = this.safeFloat (order, 'size');
         let filled = this.safeFloat (order, 'filled');
         let remaining = parseFloat (this.amountToPrecision (symbol, amount - filled));
-        let cost = parseFloat (this.priceToPrecision (symbol, filled * price));
+        let cost = undefined;
+        let status = 'open';
+        if (type === 'market') {
+            status = 'closed';
+        } else {
+            cost = parseFloat (this.priceToPrecision (symbol, filled * price));
+        }
         let trades = undefined;
         let fee = undefined;
         let info = order;
