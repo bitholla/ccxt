@@ -93,6 +93,23 @@ module.exports = class gateio extends Exchange {
                     ],
                 },
             },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://ws.gateio.io/v3/',
+                    },
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
+            },
             'fees': {
                 'trading': {
                     'tierBased': true,
@@ -808,5 +825,77 @@ module.exports = class gateio extends Exchange {
             }
         }
         return response;
+    }
+
+    _websocketOnMessage (contextId, data) {
+        let msg = JSON.parse (data);
+        let oid = this.safeString (msg, 'id');
+        let method = this.safeString (msg, 'method');
+        if (typeof method === 'undefined') {
+            // subscription response
+            // let status = this.safeString (msg['result'], 'status');
+            this.emit (oid, true);
+        } else {
+            if (method === 'depth.update') {
+                this._websocketHandleOb (contextId, msg);
+            }
+        }
+    }
+
+    _websocketHandleOb (contextId, msg) {
+        let params = this.safeValue (msg, 'params');
+        let clean = params[0];
+        let ob = params[1];
+        let symbol = this.findSymbol (params[2].toLowerCase ());
+        if (clean) {
+            ob = this.parseOrderBook (ob, undefined);
+            let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+            data['ob'] = ob;
+            this._contextSetSymbolData (contextId, 'ob', symbol, data);
+            this.emit ('ob', symbol, this._cloneOrderBook (ob, data['limit']));
+        } else {
+            let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+            let obMerged = this.mergeOrderBookDelta (data['ob'], ob, undefined);
+            data['ob'] = obMerged;
+            this._contextSetSymbolData (contextId, 'ob', symbol, data);
+            this.emit ('ob', symbol, this._cloneOrderBook (obMerged, data['limit']));
+        }
+    }
+
+    _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob') {
+            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        let id = this.market_id (symbol).toUpperCase ();
+        let payload = {
+            'id': nonce,
+            'method': 'depth.subscribe',
+            'params': [id, 30, '0.00001'],
+        };
+        let data = this._contextGetSymbolData (contextId, event, symbol);
+        data['limit'] = this.safeInteger (params, 'limit', undefined);
+        this._contextSetSymbolData (contextId, event, symbol, data);
+        this.websocketSendJson (payload);
+    }
+
+    _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob') {
+            throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        let id = this.market_id (symbol).toUpperCase ();
+        let payload = {
+            'id': nonce,
+            'method': 'depth.unsubscribe',
+            'params': [id],
+        };
+        this.websocketSendJson (payload);
+    }
+
+    _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
+            return this._cloneOrderBook (data['ob'], limit);
+        }
+        return undefined;
     }
 };

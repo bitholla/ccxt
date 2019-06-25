@@ -16,7 +16,7 @@ furnished to do so, subject to the following conditions:
 The above copyright notice and this permission notice shall be included in all
 copies or substantial portions of the Software.
 
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
 AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
@@ -29,6 +29,14 @@ SOFTWARE.
 //-----------------------------------------------------------------------------
 
 namespace ccxt;
+
+use React;
+use Clue;
+
+require __DIR__.'/../vendor/autoload.php';
+require_once 'php/websocket/WebsocketConnection.php';
+require_once 'php/websocket/PusherLightConnection.php';
+require_once 'php/websocket/SocketIoLightConnection.php';
 
 use kornrunner\Eth;
 use kornrunner\Secp256k1;
@@ -48,7 +56,7 @@ const SIGNIFICANT_DIGITS = 1;
 const NO_PADDING = 0;
 const PAD_WITH_ZERO = 1;
 
-class Exchange {
+abstract class Exchange extends CcxtEventEmitter {
 
     const VERSION = '1.18.630';
 
@@ -80,7 +88,6 @@ class Exchange {
     );
 
     public static $exchanges = array (
-        '_1btcxe',
         'acx',
         'allcoin',
         'anxpro',
@@ -218,6 +225,7 @@ class Exchange {
         'yobit',
         'zaif',
         'zb',
+        '_1btcxe',
     );
 
     public static function split ($string, $delimiters = array (' ')) {
@@ -697,6 +705,7 @@ class Exchange {
     }
 
     public function __construct ($options = array ()) {
+        parent::__construct();
 
         // todo auto-camelcasing for methods in PHP
         // $method_names = get_class_methods ($this);
@@ -746,6 +755,7 @@ class Exchange {
         $this->certified = false;
         $this->urls      = array ();
         $this->api       = array ();
+        $this->wsconf    = array ();
         $this->comment   = null;
 
         $this->markets       = null;
@@ -922,6 +932,22 @@ class Exchange {
 
         if ($this->api)
             $this->define_rest_api ($this->api, 'request');
+
+        if (array_key_exists ('react_loop', $options)) {
+            $this->react_loop = $options['react_loop'];
+        } else {
+            $this->react_loop = React\EventLoop\Factory::create();
+        }
+        $this->websocketContexts = array();
+        $this->websocketDelayedConnections = array();
+        // renaming methods from camel to snake
+        if (isset($this->wsconf['methodmap'])) {
+            foreach($this->wsconf['methodmap'] as $m => $method) {
+                $this->wsconf['methodmap'][$m] =  preg_replace_callback('/[A-Z]/', function ($matches) {
+                    return '_' . strtolower($matches[0]);
+                }, $method);
+            }
+        }
 
         if ($this->markets)
             $this->set_markets ($this->markets);
@@ -2537,6 +2563,908 @@ class Exchange {
     public function signMessage ($message, $privateKey) {
         return $this->signHash ($this->hashMessage ($message), $privateKey);
     }
+    // -----------------------------------------------------------------
+    // websocket methods
+    public function searchIndexToInsertOrUpdate ($value, &$orderedArray, $key, $descending = false) {
+        $direction = $descending ? -1 : 1;
+        $compare = function ($a, $b) use($key, $direction) {
+            return (($a < $b) ? -$direction :
+                (($a > $b) ?  $direction : 0));
+        };
+        for ($i = 0; $i < count($orderedArray); $i++) {
+            if ($compare ($orderedArray[$i][$key], $value) >= 0) {
+                return $i;
+            }
+        }
+        return $i;
+    }
+    public function updateBidAsk ($bidAsk, &$currentBidsAsks, $bids = false) {
+        // insert or replace ordered
+        $index = $this->searchIndexToInsertOrUpdate ($bidAsk[0], $currentBidsAsks, 0, $bids);
+        if (($index < count($currentBidsAsks)) && ($currentBidsAsks[$index][0] === $bidAsk[0])){
+            // found
+            if ($bidAsk[1] == 0) {
+                // remove
+                array_splice ($currentBidsAsks, $index, 1);
+            } else {
+                // update
+                $currentBidsAsks[$index] = $bidAsk;
+            }
+        } else {
+            if ($bidAsk[1] != 0) {
+                // insert
+                array_splice ($currentBidsAsks, $index, 0, array($bidAsk));
+            }
+        }
+    }
+
+    public function updateBidAskDiff ($bidAsk, &$currentBidsAsks, $bids = false) {
+        // insert or replace ordered
+        $index = $this->searchIndexToInsertOrUpdate ($bidAsk[0], $currentBidsAsks, 0, $bids);
+        if (($index < count($currentBidsAsks)) && ($currentBidsAsks[$index][0] === $bidAsk[0])){
+            // found
+            $nextValue = $currentBidsAsks[$index][1] + $bidAsk[1];
+            if ($nextValue == 0) {
+                // remove
+                array_splice ($currentBidsAsks, $index, 1);
+            } else {
+                // update
+                $currentBidsAsks[$index][1] = $nextValue;
+            }
+        } else {
+            if ($bidAsk[1] != 0) {
+                // insert
+                array_splice ($currentBidsAsks, $index, 0, array($bidAsk));
+            }
+        }
+    }
+
+    public function &mergeOrderBookDelta (&$currentOrderBook, &$orderbook, $timestamp = null, $bids_key = 'bids', $asks_key = 'asks', $price_key = 0, $amount_key = 1) {
+        $bids = is_array ($orderbook) && array_key_exists ($bids_key, $orderbook) ?
+            $this->parse_bids_asks ($orderbook[$bids_key], $price_key, $amount_key) :
+            array ();
+        foreach ($bids as $bid) {
+            $this->updateBidAsk ($bid, $currentOrderBook['bids'], true);
+        }
+        $asks = is_array ($orderbook) && array_key_exists ($asks_key, $orderbook) ?
+                $this->parse_bids_asks ($orderbook[$asks_key], $price_key, $amount_key) :
+                array ();
+        foreach ($asks as $ask) {
+            $this->updateBidAsk ($ask, $currentOrderBook['asks'], false);
+        }
+        
+        $currentOrderBook['timestamp'] = $timestamp;
+        $currentOrderBook['datetime'] = isset ($timestamp) ? $this->iso8601 ($timestamp) : null;
+        return $currentOrderBook;
+    }
+
+    public function &mergeOrderBookDeltaDiff (&$currentOrderBook, &$orderbook, $timestamp = null, $bids_key = 'bids', $asks_key = 'asks', $price_key = 0, $amount_key = 1) {
+        $bids = is_array ($orderbook) && array_key_exists ($bids_key, $orderbook) ?
+            $this->parse_bids_asks ($orderbook[$bids_key], $price_key, $amount_key) :
+            array ();
+        foreach ($bids as $bid) {
+            $this->updateBidAskDiff ($bid, $currentOrderBook['bids'], true);
+        }
+        $asks = is_array ($orderbook) && array_key_exists ($asks_key, $orderbook) ?
+                $this->parse_bids_asks ($orderbook[$asks_key], $price_key, $amount_key) :
+                array ();
+        foreach ($asks as $ask) {
+            $this->updateBidAskDiff ($ask, $currentOrderBook['asks'], false);
+        }
+        
+        $currentOrderBook['timestamp'] = $timestamp;
+        $currentOrderBook['datetime'] = isset ($timestamp) ? $this->iso8601 ($timestamp) : null;
+        return $currentOrderBook;
+    }
+
+    protected function _websocketContextGetSubscribedEventSymbols ($conxid) {
+        $ret = array();
+        $events = $this->_contextGetEvents($conxid);
+        foreach ($events as $key => $event) {
+            foreach ($event as $symbol => $symbolContext) {
+                if (($symbolContext['subscribed']) || ($symbolContext['subscribing'])) {
+                    $params = isset($symbolContext['params']) ? $symbolContext['params'] : array();
+                    $ret[] = array (
+                        'event'=> $key,
+                        'symbol'=> $symbol,
+                        'params' => $params
+                    );
+                }
+            }
+        }
+        return $ret;
+    }
+
+    protected function _websocketValidEvent ($event) {
+        return (isset($this->wsconf['events'])) && (array_key_exists ($event, $this->wsconf['events']));
+    }
+    
+    protected function _websocket_reset_context($conxid, $conxtpl = null){
+        if (!array_key_exists ($conxid, $this->websocketContexts)) {
+            $this->websocketContexts[$conxid] = array(
+                '_'=> array(),
+                'conx-tpl'=> $conxtpl,
+                'events'=> array(),
+                'conx'=> null,
+            );
+        } else {
+            $events = $this->_contextGetEvents($conxid);
+            foreach (array_keys ($events) as $key) {
+                $event = &$events[$key];
+                foreach ($event as $symbol => $symbolContext) {
+                    $event[$symbol]['subscribed'] = false;
+                    $event[$symbol]['subscribing'] = false;
+                    $event[$symbol]['data'] = array();
+                }
+            }
+        }
+    }
+
+    protected function _contextGetConxTpl($conxid) {
+        return $this->websocketContexts[$conxid]['conx-tpl'];
+    }
+
+    protected function _contextGetConnection($conxid) {
+        if ($this->websocketContexts[$conxid]['conx'] === null){
+            return null;
+        }
+        return $this->websocketContexts[$conxid]['conx']['conx'];
+    }
+
+    protected function &_contextGetConnectionInfo ($conxid) {
+        if ($this->websocketContexts[$conxid]['conx'] === null){
+            throw new NotSupported ("websocket <" . $conxid . "> not found in this exchange: " . $this->id);
+        }
+        return $this->websocketContexts[$conxid]['conx'];
+    }
+
+    protected function _contextIsConnectionReady($conxid) {
+        return $this->websocketContexts[$conxid]['conx']['ready'];
+    }
+
+    protected function _contextSetConnectionReady($conxid, $ready) {
+        $this->websocketContexts[$conxid]['conx']['ready'] = $ready;
+    }
+
+    protected function _contextIsConnectionAuth($conxid) {
+        return $this->websocketContexts[$conxid]['conx']['auth'];
+    }
+
+    protected function _contextSetConnectionAuth($conxid, $auth) {
+        $this->websocketContexts[$conxid]['conx']['auth'] = $auth;
+    }
+
+    protected function _contextSetConnectionInfo($conxid, $info) {
+        $this->websocketContexts[$conxid]['conx'] = $info;
+    }
+
+    protected function _contextSet ($conxid, $key, &$data) {
+        $this->websocketContexts[$conxid]['_'][$key] = $data;
+    }
+
+    protected function &_contextGet ($conxid, $key) {
+        return $this->websocketContexts[$conxid]['_'][$key];
+    }
+
+    protected function &_contextGetEvents($conxid) {
+        return $this->websocketContexts[$conxid]['events'];
+    }
+
+    protected function &_contextGetSymbols($conxid, $event){
+        return $this->websocketContexts[$conxid]['events'][$event];
+    }
+
+    protected function _contextResetEvent($conxid, $event) {
+        $this->websocketContexts[$conxid]['events'][$event] = array();
+    }
+
+    protected function _contextResetSymbol($conxid, $event, $symbol) {
+        $this->websocketContexts[$conxid]['events'][$event][$symbol] = array(
+            'subscribed'=> false,
+            'subscribing'=> false,
+            'data'=> array(),
+        );
+    }
+
+    protected function &_contextGetSymbolData($conxid, $event, $symbol) {
+        return $this->websocketContexts[$conxid]['events'][$event][$symbol]['data'];
+    }
+
+    protected function _contextSetSymbolData($conxid, $event, $symbol, $data){
+        $this->websocketContexts[$conxid]['events'][$event][$symbol]['data'] = $data;
+    }
+
+    protected function _contextSetSubscribed ($conxid, $event, $symbol, $subscribed, $params=array()) {
+        $this->websocketContexts[$conxid]['events'][$event][$symbol]['subscribed'] = $subscribed;
+        $this->websocketContexts[$conxid]['events'][$event][$symbol]['params'] = $params;
+    }
+
+    protected function _contextIsSubscribed ($conxid, $event, $symbol) {
+        return (isset($this->websocketContexts[$conxid]['events'][$event])) && 
+            (isset($this->websocketContexts[$conxid]['events'][$event][$symbol])) && 
+            $this->websocketContexts[$conxid]['events'][$event][$symbol]['subscribed'];
+    }
+
+    protected function _contextSetSubscribing ($conxid, $event, $symbol, $subscribing) {
+        $this->websocketContexts[$conxid]['events'][$event][$symbol]['subscribing'] = $subscribing;
+    }
+
+    protected function _contextIsSubscribing ($conxid, $event, $symbol) {
+        return (isset($this->websocketContexts[$conxid]['events'][$event])) && 
+            (isset($this->websocketContexts[$conxid]['events'][$event][$symbol])) && 
+            $this->websocketContexts[$conxid]['events'][$event][$symbol]['subscribing'];
+    }
+
+/*
+    protected function &_websocket_connection_get ($conxid = 'default') {
+        if (!array_key_exists ($conxid, $this->asyncConnectionPool)) {
+            throw new NotSupported ("async <" . $conxid . "> not found in this exchange: " . $this->id);
+        }
+        return $this->asyncConnectionPool[$conxid];
+    }
+*/
+    protected function _websocketGetConxid4Event ($event, $symbol) {
+        $eventConf = $this->safe_value($this->wsconf['events'], $event);
+        $conxParam = $this->safe_value ($eventConf, 'conx-param', array(
+            'id'=> '{id}'
+        ));
+        return array (
+            'conxid' => $this->implodeParams ($conxParam['id'], array (
+                'event'=> $event,
+                'symbol'=> $symbol,
+                'id'=> $eventConf['conx-tpl']
+            )),
+            'conxtpl' => $eventConf['conx-tpl']
+        );
+    }
+
+    protected function _websocket_get_action_for_event ($conxid, $event, $symbol, $subscription=true, $subscriptionParams = array()) {
+        // if subscription and still subscribed no action returned
+        $isSubscribed = $this->_contextIsSubscribed($conxid, $event, $symbol);
+        $isSubscribing = $this->_contextIsSubscribing($conxid, $event, $symbol);
+        if ($subscription && ($isSubscribed || $isSubscribing)) {
+            return null;
+        }
+        // if unsubscription and no subscribed and no subscribing no action returned
+        if ( !$subscription && (! $isSubscribed && !$isSubscribing)) {
+            return null;
+        }
+        // get conexion type for event
+        $eventConf = $this->safe_value ($this->wsconf['events'], $event);
+        if ($eventConf === null) {
+            throw new ExchangeError ("invalid websocket configuration for event: " . $event . " in exchange: " . $this->id);
+        }
+        $conxTplName = $this->safe_string ($eventConf, 'conx-tpl', 'default');
+        $conxTpl = $this->safe_value ($this->wsconf['conx-tpls'], $conxTplName);
+        if ($conxTpl === null) {
+            throw new ExchangeError ("tpl websocket conexion: " . $conxTplName . " does not exist in exchange: " . $this->id);
+        }
+        $conxParam = $this->safe_value ($eventConf, 'conx-param', array (
+            'url'=> '{baseurl}',
+            'id'=> '{id}',
+            'stream'=> '{symbol}'
+        ));
+        $params = array_merge_recursive ($conxTpl, array (
+            'event'=> $event,
+            'symbol'=> $symbol,
+            'id'=> $conxTplName
+        ));
+        $config = array_merge_recursive ($conxTpl);
+        foreach ($conxParam as $key => $param) {
+            $config[$key] = $this->implode_params ($param, $params);
+        }
+        if (! (array_key_exists ('id', $config) && array_key_exists ('url', $config) && array_key_exists('type', $config))) {
+            throw new ExchangeError ("invalid websocket configuration in exchange: " . $this->id);
+        }
+        if ($config['type'] === 'signalr') {
+            return array (
+                'action'=> 'connect',
+                'conx-config'=> $config,
+                'reset-context'=> 'onconnect',
+                'conx-tpl'=> $conxTplName,
+            );
+        } else if ($config['type'] === 'ws-io') {
+            return array (
+                'action'=> 'connect',
+                'conx-config'=> $config,
+                'reset-context'=> 'onconnect',
+                'conx-tpl'=> $conxTplName,
+            );
+        } else if ($config['type'] === 'pusher') {
+            return array (
+                'action'=> 'connect',
+                'conx-config'=> $config,
+                'reset-context'=> 'onconnect',
+                'conx-tpl'=> $conxTplName,
+            );
+        } else if ($config['type'] === 'ws') {
+            return array (
+                'action'=> 'connect',
+                'conx-config'=> $config,
+                'reset-context'=> 'onconnect',
+                'conx-tpl'=> $conxTplName,
+            );
+        } else if ($config['type'] === 'ws-s') {
+            $subscribed = $this->_websocketContextGetSubscribedEventSymbols ($config['id']);
+            if ($subscription) {
+                $subscribed[] = array (
+                    'event'=> $event,
+                    'symbol'=> $symbol,
+                );
+                $config ['url'] = $this->_websocket_generate_url_stream ($subscribed, $config, $subscriptionParams);
+                return array (
+                    'action'=> 'reconnect',
+                    'conx-config'=> $config,
+                    'reset-context'=> 'onreconnect',
+                    'conx-tpl'=> $conxTplName,
+                );
+            } else {
+                foreach ($subscribed as $index => $element) {
+                    if (($element['event'] === $event) && ($element['symbol'] === $symbol)) {
+                        array_splice ($subscribed, $index, 1);
+                        break;
+                    }
+                }
+                if (count ($subscribed) === 0) {
+                    return array (
+                        'action'=> 'disconnect',
+                        'conx-config'=> $config,
+                        'reset-context'=> 'always',
+                        'conx-tpl'=> $conxTplName,
+                    );
+
+                } else {
+                    $config ['url'] = $this->_websocket_generate_url_stream ($subscribed, $config, $subscriptionParams);
+                    return array(
+                        'action'=> 'reconnect',
+                        'conx-config'=> $config,
+                        'reset-context'=> 'onreconnect',
+                        'conx-tpl'=> $conxTplName,
+                    );
+                }
+            }
+        } else {
+            throw new NotSupported ("invalid websocket connection: " . $config['type'] . " for exchange " . $this->id);
+        }
+    }
+
+    protected function _websocket_ensure_conx_active ($event, $symbol, $subscribe, $subscriptionParams=array(), $delayed=false) {
+        $this->load_markets();
+        $ret = $this->_websocketGetConxid4Event ($event, $symbol);
+        $conxid = $ret['conxid'];
+        $conxtpl = $ret['conxtpl'];
+        if (!(array_key_exists($conxid, $this->websocketContexts))) {
+            $this->_websocket_reset_context($conxid, $conxtpl);
+        }
+        $action = $this->_websocket_get_action_for_event ($conxid, $event, $symbol, $subscribe, $subscriptionParams);
+        if ($action != null) {
+            $conxConfig = $this->safe_value ($action, 'conx-config', array());
+            $conxConfig['verbose'] = $this->verbose;
+            if (!(array_key_exists ($event, $this->_contextGetEvents($conxid)))) {
+                $this->_contextResetEvent($conxid, $event);
+            }
+            if (!(array_key_exists ($symbol, $this->_contextGetSymbols($conxid, $event)))){
+                $this->_contextResetSymbol($conxid, $event, $symbol);
+            }
+            if ($action['action'] === 'reconnect') {
+                $conx = $this->_contextGetConnection($conxid);
+                if ($conx != null) {
+                    $conx->close();
+                }
+                if (!delayed){
+                    if ($action['reset-context'] === 'onreconnect') {
+                        // $this->_websocket_reset_context($conxid);
+                        $this->_contextResetSymbol($conxid, $event, $symbol);
+                    }
+                }
+                $this->_contextSetConnectionInfo ($conxid, $this->_websocket_initialize($conxConfig, $conxid));
+            } else if ($action['action'] === 'connect') {
+                $conx = $this->_contextGetConnection($conxid);
+                if ($conx != null) {
+                    if (! $conx->isActive()) {
+                        $conx->close();
+                        $this->_websocket_reset_context($conxid);
+                        $this->_contextSetConnectionInfo ($conxid, $this->_websocket_initialize($conxConfig, $conxid));
+                    }
+                } else {
+                    $this->_websocket_reset_context($conxid);
+                    $this->_contextSetConnectionInfo ($conxid, $this->_websocket_initialize($conxConfig, $conxid));
+                }
+            } else if ($action['action'] === 'disconnect') {
+                $conx = $this->_contextGetConnection($conxid);
+                if ($conx != null) {
+                    $conx->close();
+                    $this->_websocket_reset_context($conxid);
+                }
+                if ($delayed) {
+                    // if not subscription in conxid remove from delayed
+                    if (array_key_exists($conxid, $this->websocketDelayedConnections)) {
+                        $this->omit ($this->websocketDelayedConnections, $conxid);
+                    }
+                }
+                return $conxid;
+            }
+            /*
+            if (!array_key_exists ($symbol, $this->asyncContext[$event])) {
+                $this->asyncContext[$event][$symbol] = array(
+                    'conxid' => $conxConfig['id'],
+                    'subscribed' => false,
+                    'subscribing' => false,
+                    'data' => array()
+                );
+            }
+            */
+            if ($delayed) {
+                if (!array_key_exists($conxid, $this->websocketDelayedConnections)){
+                    $this->websocketDelayedConnections[$conxid] = array(
+                        'conxtpl'=> $conxtpl,
+                        'reset'=> false //$action['action'] != 'connect'
+                    );
+                }
+            } else {
+                $this->websocket_connect ($conxid);
+            }
+        }
+        return $conxid;
+    }
+
+    protected function _websocket_connect_delayed() {
+        foreach ($this->websocketDelayedConnections as $conxid => $value){
+            try {
+                if ($this->websocketDelayedConnections[$conxid]['reset']){
+                    $this->_websocket_reset_context($conxid, $this->websocketDelayedConnections[$conxid]['conxtpl']);
+                }
+                Clue\React\Block\await($this->websocketConnect($conxid), $this->react_loop);
+            } catch (Exception $ex) {
+            }
+        }
+        $this->websocketDelayedConnections = array();
+    }
+
+    protected function websocket_connect ($conxid = 'default') {
+        $websocketConxInfo = &$this->_contextGetConnectionInfo($conxid);
+        $conxTpl = $this->_contextGetConxTpl ($conxid);
+        $websocketConnection = &$websocketConxInfo['conx'];
+        $this->load_markets();
+        if (!$websocketConxInfo['ready']) {
+            $wait4readyEvent = $this->safe_string ($this->wsconf['conx-tpls'][$conxTpl], 'wait4readyEvent');
+            if ($wait4readyEvent !== null) {
+                $deferred = new \React\Promise\Deferred();
+                $this->once ($wait4readyEvent, function ($success, $error = null) use ($deferred, &$websocketConxInfo){
+                    if ($success) {
+                        $websocketConxInfo['ready'] = true;
+                        $deferred->resolve();
+                    } else {
+                        $deferred->reject($error);
+                    }
+                });
+                Clue\React\Block\await($websocketConnection->connect(), $this->react_loop);
+                Clue\React\Block\await ($deferred->promise(), $this->react_loop);
+            } else {
+                Clue\React\Block\await ($websocketConnection->connect (), $this->react_loop);
+            }
+        }
+    }
+
+    protected function websocketParseJson (&$rawData) {
+        return json_decode ($rawData, true);
+    }
+
+    public function websocketClose ($conxid = 'default') {
+        $websocketConxInfo = &$this->_contextGetConnectionInfo($conxid);
+        $websocketConxInfo['conx']->close();
+        // ensure invoke close
+        $this->_websocketOnClose($conxid);
+    }
+
+    public function websocketCloseAll (){
+        foreach ($this->websocketContexts as $key => $value) {
+            $this->websocketClose ($key);
+        }
+    }
+
+    public function websocketCleanContext($conxid = null){
+        if (conxid == null){
+            foreach ($this->websocketContexts as $conxid => $value) {
+                $this->_websocket_reset_context(conxid);
+            }
+        } else {
+            $this->_websocket_reset_context($conxid);
+        }
+    }
+
+    public function websocketRecoverConxid ($conxid = 'default', $eventSymbols = null) {
+        if ($eventSymbols == null) {
+            $eventSymbols = $this->_websocketContextGetSubscribedEventSymbols ($conxid);
+        }
+        $this->websocketClose ($conxid);
+        $this->_websocket_reset_context($conxid);
+        Clue\React\Block\await ($this->websocket_subscribe_all ($eventSymbols), $this->react_loop);
+    }
+
+    public function websocketSend ($data, $conxid = 'default') {
+        $websocketConxInfo = &$this->_contextGetConnectionInfo($conxid);
+        if ($this->verbose) {
+            echo ("Websocket send:");
+            echo ($data);
+            echo("\n");
+        }
+        $websocketConxInfo['conx']->send($data);
+    }
+
+    public function websocketSendJson ($data, $conxid = 'default') {
+        $websocketConxInfo = &$this->_contextGetConnectionInfo($conxid);
+        if ($this->verbose) {
+            echo ("Websocket send:");
+            echo (json_encode($data));
+            echo("\n");
+        }
+        $conx = &$websocketConxInfo['conx'];
+        $conx->sendJson($data);
+    }
+
+    protected function _websocket_initialize (&$websocketConfig, $conxid = 'default') {
+        $websocketConnectionInfo = array(
+            'auth'=> false,
+            'ready'=> false,
+            'conx'=> null
+        );
+        $websocketConfig = $this->_websocket_on_init ($conxid, $websocketConfig);
+        if ($websocketConfig['type'] === 'signalr') {
+            $websocketConnectionInfo['conx'] = new WebsocketConnection ($websocketConfig, $this->timeout, $this->react_loop);
+        } else if ($websocketConfig['type'] === 'ws-io') {
+            $websocketConnectionInfo['conx'] = new SocketIoLightConnection ($websocketConfig, $this->timeout, $this->react_loop);
+        } else if ($websocketConfig['type'] === 'pusher') {
+            $websocketConnectionInfo['conx'] = new PusherLightConnection ($websocketConfig, $this->timeout, $this->react_loop);
+        } else if ($websocketConfig['type'] === 'ws') {
+            $websocketConnectionInfo['conx'] = new WebsocketConnection ($websocketConfig, $this->timeout, $this->react_loop);
+        } else if ($websocketConfig['type'] === 'ws-s') {
+            $websocketConnectionInfo['conx'] = new WebsocketConnection ($websocketConfig, $this->timeout, $this->react_loop);
+        } else {
+            throw new NotSupported ("invalid async connection: " . $websocketConfig['type'] . " for exchange " . $this->id);
+        }
+        
+        $conx = &$websocketConnectionInfo['conx'];
+        $that = $this;
+        $conx->on ('open', function () use ($conxid, $conx, $that, &$websocketConnectionInfo){
+            try {
+                $websocketConnectionInfo['auth'] = false;
+                $that->_websocket_on_open($conxid, $conx->options);
+            } catch (Exception $ex) {
+                $this->emit ('err', $ex, $conxid);
+            }
+        });
+        $conx->on ('err', function ($err) use ($conxid, &$websocketConnectionInfo) {
+            $websocketConnectionInfo['auth'] = false;
+            $this->_websocket_on_error($conxid);
+            // $this->_websocket_reset_context ($conxid);
+            $this->emit ('err', new NetworkError($err), $conxid);
+        });
+        $conx->on ('message', function ($data) use ($conxid) {
+            if ($this->verbose) {
+                echo ("\n" . $conxid. " <-:");
+                echo ($data);
+                echo("\n");
+            }
+            try {
+                $this->_websocket_on_message ($conxid, $data);
+            } catch (Exception $ex) {
+                $this->emit ('err', $ex, $conxid);
+            }
+        });
+        $conx->on ('close', function () use ($conxid, &$websocketConnectionInfo) {
+            $websocketConnectionInfo['auth'] = false;
+            $this->_websocket_on_close($conxid);
+            // $this->_websocket_reset_context ($conxid);
+            $this->emit ('close', $conxid);
+        });
+
+        return $websocketConnectionInfo;
+    }
+
+    protected function timeout_promise ($promise, $scope) {
+        return React\Promise\Timer\timeout($promise, $this->timeout/1000, $this->react_loop)
+        ->otherwise(function($exception) use($scope) {
+            if ($exception instanceof React\Promise\Timer\TimeoutException) {
+                throw new RequestTimeout ($this->id . ' ' . $scope . ' request timed out (' . $this->timeout . ' ms)');
+            }
+            throw $exception;
+        });
+    }
+
+    public function &_cloneOrderBook ($ob, $limit = null) {
+        $ret =  array (
+            'timestamp'=> $ob['timestamp'],
+            'datetime' => $ob['datetime'],
+            'nonce'=> $ob['nonce'],
+        );
+        if ($limit === null) {
+            $ret['bids'] = array_slice ($ob['bids'], 0);
+            $ret['asks'] = array_slice ($ob['asks'], 0);
+        } else {
+            $ret['bids'] = array_slice ($ob['bids'], 0, $limit);
+            $ret['asks'] = array_slice ($ob['asks'], 0, $limit);
+            
+        }
+        return $ret;
+    }
+    
+    protected function _executeAndCallback ($contextId, $method, $params, $callback, $context = array(), $thisParam = null) {
+        $thisParam = ($thisParam !== null) ? $thisParam : $this;
+        $that = $this;
+
+        // Clue\React\Block\await (function () use ($that, $method, $params, $callback, $context, $thisParam){
+            try {
+                $ret = call_user_func_array (array ($that, $method), $params);
+                try {
+                    call_user_func_array (array ($thisParam, $callback), array($context, null, $ret));
+                } catch (Exception $ex) {
+                    $that.emit ('err', new ExchangeError ($that->id . ': error invoking method ' . $callback . ' in _executeAndCallback: '. ex), $contextId);
+                }
+            } catch (Exception $ex) {
+                try {
+                    call_user_func_array (array ($thisParam, $callback), array($context, $ex, null));
+                } catch (Exception $ex) {
+                    $that.emit ('err', new ExchangeError ($that->id . ': error invoking method ' . $callback . ' in _executeAndCallback: '. ex), $contextId);
+                }
+
+            }
+        //});
+    }
+
+    public function websocket_fetch_order_book ($symbol, $limit = null) {
+        if (!$this->_websocketValidEvent('ob')) {
+            throw new ExchangeError ('Not valid event ob for exchange ' . $this->id);
+        }
+        $conxid = $this->_websocket_ensure_conx_active ('ob', $symbol, true);
+        $ob = $this->_get_current_websocket_orderbook ($conxid, $symbol, $limit);
+        if ($ob != null) {
+            return $ob;
+        } else {
+            $deferred = new \React\Promise\Deferred();
+            $that = $this;
+
+            $f = null;
+            $f = function ($symbol_r, $ob) use ($symbol, $that, &$f, $deferred, $limit, $conxid){
+                if ($symbol_r === $symbol) {
+                    $that->removeListener ('ob', $f);
+                    $deferred->resolve($this->_get_current_websocket_orderbook ($conxid, $symbol, $limit));
+                }
+            };
+            $this->on ('ob', $f);
+            Clue\React\Block\await ($this->timeout_promise (
+                $deferred->promise(), 'websocket_fetch_order_book'), $this->react_loop);
+        }
+    }
+
+    public function websocket_subscribe ($event, $symbol, $params = array()) {
+        // if (!$this->_websocketValidEvent($event)) {
+        //     throw new ExchangeError ('Not valid event ' . $event . ' for exchange ' . $this->id);
+        // }
+        // $conxid = $this->_websocket_ensure_conx_active ($event, $symbol, true, $params);
+        // $oid = $this->nonce();// . '-' . $symbol . '-ob-subscribe';
+        // $deferred = new \React\Promise\Deferred();
+        // $that = $this;
+        // $this->once (strval($oid), function ($success, $ex = null) use($conxid, $symbol, $that, $deferred, $event) {
+        //     if ($success) {
+        //         $that->_contextSetSubscribed($conxid, $event, $symbol, true);
+        //         $that->_contextSetSubscribing($conxid, $event, $symbol, false);
+        //         $deferred->resolve ($conxid);
+        //     } else {
+        //         $ex = ($ex != null) ? $ex : new ExchangeError ('error subscribing to ' . event . '(' . symbol . ')  in ' . $this->id);
+        //         $that->_contextSetSubscribed($conxid, $event, $symbol, false);
+        //         $that->_contextSetSubscribing($conxid, $event, $symbol, false);
+        //         $deferred->reject ($ex);
+        //     }
+        // });
+        // $this->_contextSetSubscribing($conxid, $event, $symbol, true);
+        // $this->_websocket_subscribe ($conxid, $event, $symbol, $oid, $params);
+        // Clue\React\Block\await ($this->timeout_promise (
+        //     $deferred->promise(), 'websocket_subscribe'), $this->react_loop);
+        Clue\React\Block\await ($this->websocket_subscribe_all(array(
+            'event'=> $event,
+            'symbol'=> $symbol,
+            'params'=> $params
+        )), $this->react_loop);
+
+    }
+
+    public function websocket_subscribe_all ($eventSymbols) {
+        foreach ($eventSymbols as $eventSymbol){
+            if (!$this->_websocketValidEvent($eventSymbol['event'])) {
+                throw new ExchangeError ('Not valid event ' . $eventSymbol['event'] . ' for exchange ' . $this->id);
+            }
+        }
+        $conxIds = array();
+        foreach ($eventSymbols as $eventSymbol){
+            $event = $eventSymbol['event'];
+            $symbol = $eventSymbol['symbol'];
+            $params = $eventSymbol['params'];
+            $conxid = $this->_websocket_ensure_conx_active ($event, $symbol, true, $params, true);
+            $conxIds[] = $conxid;
+            $this->_contextSetSubscribing($conxid, $event, $symbol, true);
+        }
+        Clue\React\Block\await ($this->_websocket_connect_delayed(), $this->react_loop);
+
+        for($i=0;$i < count($eventSymbols); $i++){
+            $conxid = $conxIds[$i];
+            $event = $eventSymbols[$i]['event'];
+            $symbol = $eventSymbols[$i]['symbol'];
+            $params = $eventSymbols[$i]['params'];
+
+            $oid = $this->nonce();// . '-' . $symbol . '-ob-subscribe';
+            $deferred = new \React\Promise\Deferred();
+            $that = $this;
+            $this->once (strval($oid), function ($success, $ex = null) use($conxid, $symbol, $that, $deferred, $event) {
+                if ($success) {
+                    $that->_contextSetSubscribed($conxid, $event, $symbol, true, $params);
+                    $that->_contextSetSubscribing($conxid, $event, $symbol, false);
+                    $deferred->resolve ($conxid);
+                } else {
+                    $ex = ($ex != null) ? $ex : new ExchangeError ('error subscribing to ' . event . '(' . symbol . ')  in ' . $this->id);
+                    $that->_contextSetSubscribed($conxid, $event, $symbol, false);
+                    $that->_contextSetSubscribing($conxid, $event, $symbol, false);
+                    $deferred->reject ($ex);
+                }
+            });
+        
+            $this->_websocket_subscribe ($conxid, $event, $symbol, $oid, $params);
+            Clue\React\Block\await ($this->timeout_promise (
+                $deferred->promise(), 'websocket_subscribe'), $this->react_loop);
+        }
+    }
+
+    public function websocket_unsubscribe ($event, $symbol, $params = array()) {
+        // if (!$this->_websocketValidEvent($event)) {
+        //     throw new ExchangeError ('Not valid event ' . $event . ' for exchange ' . $this->id);
+        // }
+        // $conxid = $this->_websocket_ensure_conx_active ($event, $symbol, false);
+        // $oid = $this->nonce();// . '-' . $symbol . '-ob-subscribe';
+
+        // $deferred = new \React\Promise\Deferred();
+        // $that = $this;
+
+        // $this->once (strval($oid), function ($success, $ex = null) use($symbol, $that, $deferred, $conxid, $event) {
+        //     if ($success) {
+        //         $that->_contextSetSubscribed($conxid, $event, $symbol, false);
+        //         $that->_contextSetSubscribing($conxid, $event, $symbol, false);
+        //         $deferred->resolve ();
+        //     } else {
+        //         $ex = ($ex != null) ? $ex : new ExchangeError ('error unsubscribing to ' . event . '(' . symbol . ')  in ' . $this->id);
+        //         $deferred->reject ($ex);
+        //     }
+        // });
+        // $this->_websocket_unsubscribe ($conxid, $event, $symbol, $oid, $params);
+        // Clue\React\Block\await ($this->timeout_promise (
+        //     $deferred->promise(), 'websocket_unsubscribe'), $this->react_loop);
+        Clue\React\Block\await ($this->websocket_unsubscribe_all(array(
+            'event'=> $event,
+            'symbol'=> $symbol,
+            'params'=> $params
+        )), $this->react_loop);
+    }
+
+    public function websocket_unsubscribe_all ($eventSymbols) {
+        foreach ($eventSymbols as $eventSymbol){
+            if (!$this->_websocketValidEvent($eventSymbol['event'])) {
+                throw new ExchangeError ('Not valid event ' . $eventSymbol['event'] . ' for exchange ' . $this->id);
+            }
+        }
+        try {
+            foreach ($eventSymbols as $eventSymbol){
+                $event = $eventSymbol['event'];
+                $symbol = $eventSymbol['symbol'];
+                $params = $eventSymbol['params'];
+                $conxid = $this->_websocket_ensure_conx_active ($event, $symbol, false, params, true);
+                $oid = $this->nonce();// . '-' . $symbol . '-ob-subscribe';
+
+                $deferred = new \React\Promise\Deferred();
+                $that = $this;
+
+                $this->once (strval($oid), function ($success, $ex = null) use($symbol, $that, $deferred, $conxid, $event) {
+                    if ($success) {
+                        $that->_contextSetSubscribed($conxid, $event, $symbol, false);
+                        $that->_contextSetSubscribing($conxid, $event, $symbol, false);
+                        $deferred->resolve ();
+                    } else {
+                        $ex = ($ex != null) ? $ex : new ExchangeError ('error unsubscribing to ' . event . '(' . symbol . ')  in ' . $this->id);
+                        $deferred->reject ($ex);
+                    }
+                });
+                $this->_websocket_unsubscribe ($conxid, $event, $symbol, $oid, $params);
+                Clue\React\Block\await ($this->timeout_promise (
+                    $deferred->promise(), 'websocket_unsubscribe'), $this->react_loop);
+            }
+        } finally {
+            Clue\React\Block\await ($this->_websocket_connect_delayed(), $this->react_loop);
+        }
+    }
+
+    protected function _websocket_on_init ($contextId, $websocketConexConfig) {
+        return $websocketConexConfig;
+    }
+
+    protected function _websocket_on_open ($contextId, $websocketConexConfig) {
+    }
+
+    protected function _websocket_on_message ($contextId, $data) {
+    }
+
+    protected function _websocket_on_close ($contextId) {
+    }
+
+    protected function _websocket_on_error ($contextId) {
+    }
+
+    public function _websocketMarketId ($symbol) {
+        return $this->marketId($symbol);
+    }
+
+    public function _websocket_generate_url_stream ($events, $options, $subscriptionParams = array()) {
+        throw new NotSupported ("You must to implement _websocket_generate_url_stream method for exchange " . $this->id);
+    }
+
+    public function _websocket_subscribe ($contextId, $event, $symbol, $oid, $params = array()) {
+        throw new NotSupported ('subscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+    }
+
+    public function _websocket_unsubscribe ($contextId, $event, $symbol, $oid, $params = array()) {
+        throw new NotSupported ('unsubscribe ' . $event . '(' . $symbol . ') not supported for exchange ' . $this->id);
+    }
+
+    protected function _websocketMethodMap ($key) {
+        if (!array_key_exists ('methodmap', $this->wsconf) || !array_key_exists ($key, $this->wsconf['methodmap'])) {
+            throw new ExchangeError ($this->id . ': ' . $key . ' not found in websocket methodmap');
+        }
+        return $this->wsconf['methodmap'][$key];
+    }
+
+    protected function _setTimeout ($contextId, $mseconds, $method, $params, $thisParam = null) {
+        $thisParam = ($thisParam !== null) ? $thisParam : $this;
+        $that = $this;
+        return $this->react_loop->addTimer($mseconds / 1000, function() use ($thisParam, $params, $method, $that) {
+            try {
+                call_user_func_array (array ($thisParam, $method), $params);
+            } catch (Exception $ex) {
+                $that.emit ('err', new ExchangeError ($that->id . ': error invoking method ' . $method . ': '. ex), $contextId);
+            }
+        });
+    }
+
+    protected function _cancelTimeout ($handle) {
+        $this->react_loop->cancelTimer($handle);
+    }
+
+    protected function _setTimer ($contextId, $mseconds, $method, $params, $thisParam = null) {
+        $thisParam = ($thisParam !== null) ? $thisParam : $this;
+        $that = $this;
+        return $this->react_loop->addPeriodicTimer($mseconds / 1000, function() use ($thisParam, $params, $method, $that) {
+            try {
+                call_user_func_array (array ($thisParam, $method), $params);
+            } catch (Exception $ex) {
+                $that.emit ('err', new ExchangeError ($that->id . ': error invoking method ' . $method . ': '. ex), $contextId);
+            }
+        });
+    }
+
+    protected function _cancelTimer ($handle) {
+        $this->react_loop->cancelTimer($handle);
+    }
+
+    public function _get_current_websocket_orderbook ($contextId, $symbol, $limit) {
+        throw new NotSupported ('You must implement _get_current_websocket_orderbook method for exchange ' . $this->id);
+    }
+
+    public function gunzip($data) {
+        return gzdecode($data);
+    }
+    
+    public function inflateRaw ($data, $from = null) {
+        if ($from == 'base64') {
+            $data = base64_decode($data);
+        }
+        return gzinflate ($data);
+    }
 
     public function oath () {
         if ($this->twofa) {
@@ -2575,3 +3503,6 @@ class Exchange {
         return str_pad((string) $otp, 6, '0', STR_PAD_LEFT);
     }
 }
+
+
+

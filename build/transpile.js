@@ -92,6 +92,7 @@ const commonRegexes = [
     [ /\.filterBy\s/g, '.filter_by'],
     [ /\.groupBy\s/g, '.group_by'],
     [ /\.findMarket\s/g, '.find_market'],
+    [ /\.setMarkets\s/g, '.set_markets'],
     [ /\.findSymbol\s/g, '.find_symbol'],
     [ /\.marketIds\s/g, '.market_ids'],
     [ /\.marketId\s/g, '.market_id'],
@@ -192,6 +193,7 @@ const pythonRegexes = [
     [ /hash \(([^,]+)\, \'(sha[0-9])\'/g, "hash($1, '$2'" ],
     [ /hmac \(([^,]+)\, ([^,]+)\, \'(md5)\'/g, 'hmac($1, $2, hashlib.$3' ],
     [ /hmac \(([^,]+)\, ([^,]+)\, \'(sha[0-9]+)\'/g, 'hmac($1, $2, hashlib.$3' ],
+    [ /new ([\S]+) \((.*)\)/g, '$1($2)'],
     [ /throw new ([\S]+) \((.*)\)/g, 'raise $1($2)'],
     [ /throw ([\S]+)/g, 'raise $1'],
     [ /try {/g, 'try:'],
@@ -252,6 +254,7 @@ const pythonRegexes = [
     [ /([^\s]+) \}/g, '$1}' ],    // PEP8 E202 remove whitespaces before right } bracket
     [ /([^a-z])(elif|if|or|else)\(/g, '$1$2 \(' ], // a correction for PEP8 E225 side-effect for compound and ternary conditionals
     [ /\=\=\sTrue/g, 'is True' ], // a correction for PEP8 E712, it likes "is True", not "== True"
+    [ /delete\s/g, 'del ' ],
 ])
 
 // ----------------------------------------------------------------------------

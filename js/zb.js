@@ -3,7 +3,7 @@
 //  ---------------------------------------------------------------------------
 
 const Exchange = require ('./base/Exchange');
-const { ExchangeError, ArgumentsRequired, AuthenticationError, InsufficientFunds, OrderNotFound, ExchangeNotAvailable, DDoSProtection, InvalidOrder } = require ('./base/errors');
+const { ExchangeError, ArgumentsRequired, AuthenticationError, InsufficientFunds, OrderNotFound, ExchangeNotAvailable, DDoSProtection, InvalidOrder, NotSupported } = require ('./base/errors');
 
 //  ---------------------------------------------------------------------------
 
@@ -121,6 +121,26 @@ module.exports = class zb extends Exchange {
                         'repay',
                         'getRepayments',
                     ],
+                },
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://api.zb.com:9999/websocket',
+                    },
+                },
+                'methodmap': {
+                    '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
             'fees': {
@@ -616,5 +636,125 @@ module.exports = class zb extends Exchange {
                 }
             }
         }
+    }
+
+    endsWith (s1, s2) {
+        let index = s1.indexOf (s2);
+        let strLen = s1.length - 0; // a transpiler workaround
+        return (index === (strLen - s2.length));
+    }
+
+    _websocketOnMessage (contextId, data) {
+        let msg = JSON.parse (data);
+        let success = this.safeValue (msg, 'success', true);
+        let channel = this.safeString (msg, 'channel');
+        let pairId = undefined;
+        let channelType = undefined;
+        if (this.endsWith (channel, '_depth')) {
+            channelType = 'ob';
+            pairId = channel.replace ('_depth', '');
+        } else {
+            // could not determine channel
+            return;
+        }
+        let pairIdList = this._contextGet (contextId, 'pairids');
+        if (typeof pairIdList === 'undefined') {
+            this.emit ('err', new ExchangeError (this.id + ' internal error: unitialized pairids dict in context '));
+            return;
+        }
+        if (!(pairId in pairIdList)) {
+            this.emit ('err', new ExchangeError (this.id + ' error receiving unexpected market id ' + pairId));
+            return;
+        }
+        let id = pairIdList[pairId];
+        let symbol = this.findSymbol (id);
+        if (!success) {
+            let code = this.safeString (msg, 'code', '0');
+            let errMsg = this.safeString (msg, 'message', 'unknown error');
+            // error?
+            if (channelType === 'ob') {
+                let ex = new ExchangeError (this.id + ' subscribing error (code: ' + code + ' error: ' + errMsg + ')');
+                this._websocketEmitObSubscription (contextId, symbol, false, ex);
+            }
+            return;
+        }
+        if (channelType === 'ob') {
+            this._websocketEmitObSubscription (contextId, symbol, true, undefined);
+            this._websocketHandleOb (contextId, msg, symbol);
+        }
+    }
+
+    _websocketEmitObSubscription (contextId, symbol, success, exception) {
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if ('sub-nonces' in data) {
+            let nonces = data['sub-nonces'];
+            const keys = Object.keys (nonces);
+            for (let i = 0; i < keys.length; i++) {
+                let nonce = keys[i];
+                this._cancelTimeout (nonces[nonce]);
+                this.emit (nonce, success, exception);
+            }
+            data['sub-nonces'] = {};
+            this._contextSetSymbolData (contextId, 'ob', symbol, data);
+        }
+    }
+
+    _websocketHandleOb (contextId, msg, symbol) {
+        let ob = this.parseOrderBook (msg);
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        data['ob'] = ob;
+        this._contextSetSymbolData (contextId, 'ob', symbol, data);
+        this.emit ('ob', symbol, this._cloneOrderBook (ob, data['limit']));
+    }
+
+    _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob') {
+            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        let id = this.market_id (symbol);
+        let pairId = id.replace ('_', '');
+        let payload = {
+            'event': 'addChannel',
+            'channel': pairId + '_depth',
+        };
+        let pairIdList = this._contextGet (contextId, 'pairids');
+        if (typeof pairIdList === 'undefined') {
+            pairIdList = {};
+        }
+        pairIdList[pairId] = id;
+        this._contextSet (contextId, 'pairids', pairIdList);
+        let data = this._contextGetSymbolData (contextId, event, symbol);
+        if (!('sub-nonces' in data)) {
+            data['sub-nonces'] = {};
+        }
+        let nonceStr = nonce.toString ();
+        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonces']);
+        data['sub-nonces'][nonceStr] = handle;
+        data['limit'] = this.safeValue (params, 'limit');
+        this._contextSetSymbolData (contextId, event, symbol, data);
+        this.websocketSendJson (payload);
+    }
+
+    _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
+        throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+    }
+
+    _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
+        let data = this._contextGetSymbolData (contextId, event, symbol);
+        if (key in data) {
+            let nonces = data[key];
+            if (timerNonce in nonces) {
+                this.omit (data[key], timerNonce);
+                this._contextSetSymbolData (contextId, event, symbol);
+            }
+        }
+    }
+
+    _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
+            return this._cloneOrderBook (data['ob'], limit);
+        }
+        return undefined;
     }
 };

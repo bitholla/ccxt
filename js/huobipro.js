@@ -3,7 +3,7 @@
 //  ---------------------------------------------------------------------------
 
 const Exchange = require ('./base/Exchange');
-const { ArgumentsRequired, AuthenticationError, ExchangeError, ExchangeNotAvailable, InvalidOrder, OrderNotFound, InsufficientFunds } = require ('./base/errors');
+const { ArgumentsRequired, AuthenticationError, ExchangeError, ExchangeNotAvailable, InvalidOrder, OrderNotFound, InsufficientFunds, NotSupported } = require ('./base/errors');
 
 //  ---------------------------------------------------------------------------
 
@@ -153,6 +153,30 @@ module.exports = class huobipro extends Exchange {
             },
             'commonCurrencies': {
                 'HOT': 'Hydro Protocol', // conflict with HOT (Holo) https://github.com/ccxt/ccxt/issues/4929
+            },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://api.huobi.pro/ws',
+                    },
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
             },
         });
     }
@@ -1152,5 +1176,135 @@ module.exports = class huobipro extends Exchange {
             'pre-transfer': 'pending',
         };
         return this.safeString (statuses, status, status);
+    }
+
+    _websocketOnMessage (contextId, data) {
+        // TODO: pako function in Exchange.js/.py/.php
+        // console.log(data);
+        let text = this.gunzip (data);
+        // text = pako.inflate (data, { 'to': 'string', });
+        // console.log (text);
+        let msg = JSON.parse (text);
+        let ping = this.safeValue (msg, 'ping');
+        let tick = this.safeValue (msg, 'tick');
+        if (typeof ping !== 'undefined') {
+            // heartbeat ping-pong
+            const sendJson = {
+                'pong': msg['ping'],
+            };
+            this.websocketSendJson (sendJson);
+        } else if (typeof tick !== 'undefined') {
+            // console.log(msg);
+            this._websocketDispatch (contextId, msg);
+        }
+        //  else :remove console.log(text);
+    }
+
+    _websocketParseTrade (trade, symbol) {
+        // {'amount': 0.01, 'ts': 1551963266001, 'id': 10049953357926186872465, 'price': 3877.04, 'direction': 'sell'}
+        let timestamp = this.safeInteger (trade, 'ts');
+        return {
+            'id': this.safeString (trade, 'id'),
+            'info': trade,
+            'timestamp': timestamp,
+            'datetime': this.iso8601 (timestamp),
+            'symbol': symbol,
+            'type': undefined,
+            'side': this.safeString (trade, 'direction'),
+            'price': this.safeFloat (trade, 'price'),
+            'amount': this.safeFloat (trade, 'amount'),
+        };
+    }
+
+    _websocketDispatch (contextId, data) {
+        // console.log('received', data.ch, 'data.ts', data.ts, 'crawler.ts', moment().format('x'));
+        const ch = this.safeString (data, 'ch');
+        const vals = ch.split ('.');
+        let rawsymbol = vals[1];
+        let channel = vals[2];
+        // :symbol
+        // const symbol = this.marketsById[rawsymbol].symbol;
+        const symbol = this.findSymbol (rawsymbol);
+        // let channel = data.ch.split('.')[2];
+        if (channel === 'depth') {
+            // :ob emit
+            // console.log('ob', data.tick);
+            // orderbook[symbol] = data.tick;
+            const timestamp = this.safeValue (data, 'ts');
+            const obdata = this.safeValue (data, 'tick');
+            let ob = this.parseOrderBook (obdata, timestamp);
+            let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+            symbolData['ob'] = ob;
+            this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+            // note, huobipro limit != depth
+            this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit']));
+        } else if (channel === 'trade') {
+            // data:
+            // {'ch': 'market.btchusd.trade.detail', 'ts': 1551962828309, 'tick': {'id': 100123237799, 'ts': 1551962828291, 'data': [{'amount': 0.435, 'ts': 1551962828291, 'id': 10012323779926186502443, 'price': 3871.72, 'direction': 'sell'}]}}
+            let multiple_trades = data['tick']['data'];
+            for (let i = 0; i < multiple_trades.length; i++) {
+                let trade = this._websocketParseTrade (multiple_trades[i], symbol);
+                this.emit ('trade', symbol, trade);
+            }
+        }
+        // TODO:kline
+        // console.log('kline', data.tick);
+    }
+
+    _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob' && event !== 'trade') {
+            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        let ch = undefined;
+        if (event === 'ob') {
+            let data = this._contextGetSymbolData (contextId, event, symbol);
+            // depth from 0 to 5
+            // see https://github.com/huobiapi/API_Docs/wiki/WS_api_reference#%E8%AE%A2%E9%98%85-market-depth-%E6%95%B0%E6%8D%AE-marketsymboldepthtype
+            let depth = this.safeInteger (params, 'depth', 2);
+            data['depth'] = depth;
+            // it is not limit
+            data['limit'] = this.safeInteger (params, 'limit', 100);
+            this._contextSetSymbolData (contextId, event, symbol, data);
+            ch = '.depth.step' + depth.toString ();
+        } else if (event === 'trade') {
+            ch = '.trade.detail';
+        }
+        const rawsymbol = this.marketId (symbol);
+        const sendJson = {
+            'sub': 'market.' + rawsymbol + ch,
+            'id': rawsymbol,
+        };
+        this.websocketSendJson (sendJson);
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
+    }
+
+    _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob' && event !== 'trade') {
+            throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        let ch = undefined;
+        if (event === 'ob') {
+            let depth = this.safeInteger (params, 'depth', 2);
+            ch = '.depth.step' + depth.toString ();
+        } else if (event === 'trade') {
+            ch = '.trade.detail';
+        }
+        const rawsymbol = this.marketId (symbol);
+        const sendJson = {
+            'unsub': 'market.' + rawsymbol + ch,
+            'id': rawsymbol,
+        };
+        this.websocketSendJson (sendJson);
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
+    }
+
+    _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if ('ob' in data && typeof data['ob'] !== 'undefined') {
+            return this._cloneOrderBook (data['ob'], limit);
+        }
+        return undefined;
     }
 };

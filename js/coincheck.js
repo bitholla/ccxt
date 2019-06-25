@@ -72,6 +72,23 @@ module.exports = class coincheck extends Exchange {
                     ],
                 },
             },
+            'wsconf': {
+                'conx-tpls': {
+                    'default': {
+                        'type': 'ws',
+                        'baseurl': 'wss://ws-api.coincheck.com/',
+                    },
+                },
+                'events': {
+                    'ob': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
+                },
+            },
             'markets': {
                 'BTC/JPY': { 'id': 'btc_jpy', 'symbol': 'BTC/JPY', 'base': 'BTC', 'quote': 'JPY', 'baseId': 'btc', 'quoteId': 'jpy' }, // the only real pair
                 // 'ETH/JPY': { 'id': 'eth_jpy', 'symbol': 'ETH/JPY', 'base': 'ETH', 'quote': 'JPY', 'baseId': 'eth', 'quoteId': 'jpy' },
@@ -409,5 +426,60 @@ module.exports = class coincheck extends Exchange {
             if (response['success'])
                 return response;
         throw new ExchangeError (this.id + ' ' + this.json (response));
+    }
+
+    _websocketOnMessage (contextId, data) {
+        let msg = JSON.parse (data);
+        let id = this.safeInteger ({
+            'a': msg[0],
+        }, 'a');
+        if (typeof id === 'undefined') {
+            // orderbook
+            this._websocketHandleOb (contextId, msg);
+        }
+    }
+
+    _websocketHandleOb (contextId, msg) {
+        let symbol = this.findSymbol (msg[0]);
+        let ob = msg[1];
+        // just testing
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if (!('ob' in data)) {
+            ob = this.parseOrderBook (ob, undefined);
+            data['ob'] = ob;
+            this.emit ('ob', symbol, this._cloneOrderBook (ob, data['limit']));
+        } else {
+            data['ob'] = this.mergeOrderBookDelta (data['ob'], ob, undefined);
+            this.emit ('ob', symbol, this._cloneOrderBook (data['ob'], data['limit']));
+        }
+        this._contextSetSymbolData (contextId, 'ob', symbol, data);
+    }
+
+    _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob') {
+            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+        }
+        let payload = {
+            'type': 'subscribe',
+            'channel': this.marketId (symbol) + '-orderbook',
+        };
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        data['limit'] = this.safeInteger (params, 'limit', undefined);
+        this._contextSetSymbolData (contextId, 'ob', symbol, data);
+        this.websocketSendJson (payload);
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
+    }
+
+    _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
+        throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
+    }
+
+    _getCurrentWebsocketOrderbook (contextId, symbol, limit) {
+        let data = this._contextGetSymbolData (contextId, 'ob', symbol);
+        if (('ob' in data) && (typeof data['ob'] !== 'undefined')) {
+            return this._cloneOrderBook (data['ob'], limit);
+        }
+        return undefined;
     }
 };
