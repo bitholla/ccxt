@@ -4,6 +4,10 @@ const WebsocketBaseConnection = require ('./websocket_base_connection');
 const WebSocket = require('ws');
 const io = require('socket.io-client');
 
+function convertSymbol (symbol) {
+    return symbol.replace('-', '/').toUpperCase();
+}
+
 const { sleep } = require ('../functions')
 
 module.exports = class WebsocketConnection extends WebsocketBaseConnection {
@@ -55,12 +59,17 @@ module.exports = class WebsocketConnection extends WebsocketBaseConnection {
                 reject(error);
             });
         
-            client.ws.on('orderbook', (data) => {
+            client.ws.on('orderbook', async (data) => {
                 // if (this.options['verbose']){
                 //     console.log("WebsocketConnection: "+data);
                 // }
                 if (!client.isClosing) {
-                    this.emit('message', data);
+                    let exchangeSymbol = data['symbol'] ? data['symbol'] : await Object.keys(data).filter(key => key.includes('-'))[0];
+                    let symbol = await convertSymbol(exchangeSymbol);
+                    this.emit('message', JSON.stringify({
+                        channel: `orderbook_${symbol}`,
+                        data: data[exchangeSymbol]
+                    }));
                 }
                 resolve();
             });

@@ -125,6 +125,11 @@ module.exports = class PusherLightConnection extends WebsocketBaseConnection {
                 } else {
                     const eventData = JSON.parse(msg.data);
                     const channel = msg.channel;
+                    console.log(JSON.stringify({
+                        event: msg.event,
+                        channel,
+                        data: eventData
+                    }))
                     this.emit('message', JSON.stringify({
                         event: msg.event,
                         channel,

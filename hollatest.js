@@ -20,8 +20,23 @@ const socket = new so({
 
 socket.connect().then(() => {
     socket.on('message', (data) => {
-        console.log(data);
+        console.log(JSON.parse(data));
     })
 }).catch((err) => {
     console.log(err);
 })
+
+// const bit = require('./js/bitstamp');
+// const bitstamp = new bit();
+
+// async function main () {
+//     bitstamp.on('ob', (market, ob) => {
+//         console.log(market, ob);
+//     })
+
+//     // await bitstamp.loadMarkets();
+//     await bitstamp.websocketSubscribe('ob', 'BTC/EUR');
+
+// };
+
+// main();

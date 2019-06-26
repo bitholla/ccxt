@@ -4,6 +4,7 @@
 
 const Exchange = require ('./base/Exchange');
 const { BadRequest, AuthenticationError, NetworkError, ArgumentsRequired, OrderNotFound, NotSupported } = require ('./base/errors');
+const io = require('socket.io-client');
 
 //  ---------------------------------------------------------------------------
 
@@ -776,6 +777,6 @@ module.exports = class hollaex extends Exchange {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         let symbolData = this._contextGetSymbolData (contextId, event, symbol);
-        
+        console.log('HELLLLLLLLOOOO', this.marketId('BTC/EUR'));
     }
 };

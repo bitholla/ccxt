@@ -69,6 +69,7 @@ const EventEmitter = require ('events')
 const WebsocketConnection = require ('./websocket/websocket_connection')
 const PusherLightConnection = require ('./websocket/pusherlight_connection')
 const SocketIoLightConnection = require ('./websocket/socketiolight_connection')
+const SocketIoConnection = require ('./websocket/socketio_connection');
 let zlib = require ('zlib');
 
 /*  ------------------------------------------------------------------------ */
@@ -1959,6 +1960,13 @@ module.exports = class Exchange extends EventEmitter {
             throw new ExchangeError ("invalid websocket configuration in exchange: " + this.id);
         }
         switch (config['type']) {
+            case 'socket-io':
+                return {
+                    'action': 'connect',
+                    'conx-config': config,
+                    'reset-context': 'onconnect',
+                    'conx-tpl': conxTplName,
+                };
             case 'signalr':
                 return {
                     'action': 'connect',
@@ -2194,6 +2202,9 @@ module.exports = class Exchange extends EventEmitter {
         websocketConfig = await this._websocketOnInit (conxid, websocketConfig);
         websocketConfig['agent'] = this.agent;
         switch (websocketConfig['type']){
+            case 'socket-io':
+                websocketConnectionInfo['conx'] = new SocketIoConnection (websocketConfig, this.timeout);
+                break;
             case 'signalr':
                 websocketConnectionInfo['conx'] = new WebsocketConnection (websocketConfig, this.timeout);
                 break;
