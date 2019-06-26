@@ -4,11 +4,15 @@
 
 const Exchange = require ('./base/Exchange');
 const { BadRequest, AuthenticationError, NetworkError, ArgumentsRequired, OrderNotFound, NotSupported } = require ('./base/errors');
-const io = require('socket.io-client');
+const hollaex = require('hollaex-node-lib');
 
 //  ---------------------------------------------------------------------------
 
 module.exports = class hollaex extends Exchange {
+    constuctor () {
+        this.subscriptions = [];
+    }
+
     describe () {
         return this.deepExtend (super.describe (), {
             'id': 'hollaex',
@@ -776,7 +780,21 @@ module.exports = class hollaex extends Exchange {
         if (event !== 'ob') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
+         // save nonce for subscription response
         let symbolData = this._contextGetSymbolData (contextId, event, symbol);
-        console.log('HELLLLLLLLOOOO', this.marketId('BTC/EUR'));
+        if (!('sub-nonces' in symbolData)) {
+            symbolData['sub-nonces'] = {};
+        }
+        symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
+        let nonceStr = nonce.toString ();
+        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        let channel = undefined;
+        symbolData['sub-nonces'][nonceStr] = handle;
+        this._contextSetSymbolData (contextId, event, symbol, symbolData);
+        // send request
+        if (event === 'ob') {
+            channel = `orderbook_${symbol}`;
+        }
+        this.websocketSend(channel);
     }
 };

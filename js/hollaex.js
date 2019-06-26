@@ -96,6 +96,9 @@ module.exports = class hollaex extends Exchange {
                         'baseurl': 'https://api.hollaex.com/realtime',
                     },
                 },
+                'methodmap': {
+                    '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                },
                 'events': {
                     'ob': {
                         'conx-tpl': 'default',
@@ -775,7 +778,70 @@ module.exports = class hollaex extends Exchange {
         if (event !== 'ob') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
+         // save nonce for subscription response
         let symbolData = this._contextGetSymbolData (contextId, event, symbol);
-        
+        if (!('sub-nonces' in symbolData)) {
+            symbolData['sub-nonces'] = {};
+        }
+        symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
+        let nonceStr = nonce.toString ();
+        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        let channel = undefined;
+        symbolData['sub-nonces'][nonceStr] = handle;
+        this._contextSetSymbolData (contextId, event, symbol, symbolData);
+        // send request
+        if (event === 'ob') {
+            channel = `orderbook_${symbol}`;
+        }
+        this.websocketSend ({
+            'event': 'subscribe',
+            'channel': channel,
+        }, contextId);
     }
+
+    _websocketOnMessage (contextId, data) {
+        let msg = JSON.parse (data);
+        let evt = this.safeString (msg, 'event');
+        if (evt === 'subscription') {
+            this._websocketHandleSubscription (contextId, msg);
+        } else if (evt === 'data') {
+            let chan = this.safeString (msg, 'channel');
+            if (chan.indexOf ('orderbook') >= 0) {
+                this._websocketHandleOrderbook (contextId, msg);
+            }
+        } else if (evt === 'trade') {
+            this._websocketHandleTrade (contextId, msg);
+        }
+    }
+
+    // _websocketHandleSubscription (contextId, msg) {
+    //     console.log(msg);
+    //     let chan = this.safeString (msg, 'channel');
+    //     let event = undefined;
+    //     if (chan.indexOf ('order_book') >= 0) {
+    //         event = 'ob';
+    //     } else {
+    //         event = undefined;
+    //     }
+    //     if (typeof event !== 'undefined') {
+    //         let parts = chan.split ('_');
+    //         let id = 'btcusd';
+    //         if (parts.length > 2) {
+    //             id = parts[2];
+    //         }
+    //         let symbol = this.findSymbol (id);
+    //         let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+    //         if ('sub-nonces' in symbolData) {
+    //             let nonces = symbolData['sub-nonces'];
+    //             const keys = Object.keys (nonces);
+    //             for (let i = 0; i < keys.length; i++) {
+    //                 let nonce = keys[i];
+    //                 this._cancelTimeout (nonces[nonce]);
+    //                 this.emit (nonce, true);
+    //             }
+    //             symbolData['sub-nonces'] = {};
+    //             this._contextSetSymbolData (contextId, event, symbol, symbolData);
+    //         }
+    //     }
+    // }
 };
