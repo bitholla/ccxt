@@ -2370,7 +2370,6 @@ module.exports = class Exchange extends EventEmitter {
     }
 
     async websocketSubscribeAll (eventSymbols) {
-        console.log('first');
         let promise = new Promise (async (resolve, reject) => {
             try {
                 for (let eventSymbol of eventSymbols){

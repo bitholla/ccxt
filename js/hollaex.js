@@ -778,14 +778,14 @@ module.exports = class hollaex extends Exchange {
         if (event !== 'ob') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-         // save nonce for subscription response
+        // save nonce for subscription response
         let symbolData = this._contextGetSymbolData (contextId, event, symbol);
         if (!('sub-nonces' in symbolData)) {
             symbolData['sub-nonces'] = {};
         }
         symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
         let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        let handle = this._setTimeout (contextId, this.timeout * 999, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
         let channel = undefined;
         symbolData['sub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
@@ -811,6 +811,33 @@ module.exports = class hollaex extends Exchange {
             }
         } else if (evt === 'trade') {
             this._websocketHandleTrade (contextId, msg);
+        }
+    }
+
+    _websocketHandleOrderbook (contextId, msg) {
+        let chan = this.safeString (msg, 'channel');
+        let parts = chan.split ('_');
+        let id = parts[1];
+        let symbol = this.findSymbol (id);
+        let data = this.safeValue (msg, 'data');
+        let datetime = this.safeString (data, 'timestamp');
+        let ob = data;
+        ob['datetime'] = datetime;
+        ob['timestamp'] = this.parse8601 (datetime);
+        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        symbolData['ob'] = ob;
+        this.emit ('ob', symbol, ob);
+        this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+    }
+
+    _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
+        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
+        if (key in symbolData) {
+            let nonces = symbolData[key];
+            if (timerNonce in nonces) {
+                this.omit (symbolData[key], timerNonce);
+                this._contextSetSymbolData (contextId, event, symbol, symbolData);
+            }
         }
     }
 
