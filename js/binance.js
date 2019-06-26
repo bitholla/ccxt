@@ -1543,6 +1543,7 @@ module.exports = class binance extends Exchange {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         if (event === 'ob') {
+            console.log(this.websocketContexts);
             let config = this._contextGet (contextId, 'config');
             if (typeof config === 'undefined') {
                 config = {};

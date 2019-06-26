@@ -1,11 +1,27 @@
-const hollaex = require('./js/hollaex');
+// const io = require('socket.io-client');
+// const socket = io('https://api.hollaex.com/realtime');
 
-const holla = new hollaex();
+// socket.on('orderbook', (data) => {
+//     console.log(data);
+// })
 
-holla.apiKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOnsiaWQiOjEwMiwiZW1haWwiOiJicmFuZG9uQGJpdGhvbGxhLmNvbSJ9LCJzY29wZXMiOlsidXNlciIsImJvdCJdLCJpc3MiOiJiaXRob2xsYS5jb20iLCJpYXQiOjE1NjA4MzcyNzN9.x0tGRwX7u6pp6rzv2x3r_Tm1enQ7eG3mA6pHMSAWrC4';
+// const bi = require('./js/binance');
+// const binance = new bi();
 
-holla.fetchWithdrawals('FI').then((data) => {
-    console.log(data);
+// binance.loadMarkets();
+
+// console.log(binance.websocketSubscribe('ob'));
+
+const so = require('./js/base/websocket/socketio_connection');
+
+const socket = new so({
+    url: 'https://api.hollaex.com/realtime'
+});
+
+socket.connect().then(() => {
+    socket.on('message', (data) => {
+        console.log(data);
+    })
 }).catch((err) => {
     console.log(err);
 })
