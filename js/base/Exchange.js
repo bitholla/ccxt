@@ -344,6 +344,11 @@ module.exports = class Exchange extends EventEmitter {
         this.last_json_response    = undefined
         this.last_response_headers = undefined
 
+        this.subscriptions = {
+            'orderbook': [],
+            'trades': [],
+        }
+
         this.arrayConcat = (a, b) => a.concat (b)
 
         const unCamelCaseProperties = (obj = this) => {
@@ -1904,9 +1909,16 @@ module.exports = class Exchange extends EventEmitter {
 
     _websocketGetConxid4Event (event, symbol) {
         let eventConf = this.safeValue(this.wsconf['events'], event);
+        // console.log(eventConf);
         let conxParam = this.safeValue (eventConf, 'conx-param', {
             'id': '{id}'
         });
+        // console.log(conxParam);
+        // console.log('implode', this.implodeParams (conxParam['id'], { 
+        //     'event': event,
+        //     'symbol': symbol,
+        //     'id': eventConf['conx-tpl']
+        // }))
         return {
             'conxid' : this.implodeParams (conxParam['id'], { 
                 'event': event,
@@ -2047,6 +2059,7 @@ module.exports = class Exchange extends EventEmitter {
             this._websocketResetContext (conxid, conxtpl);
         }
         let action = this._websocketGetActionForEvent (conxid, event, symbol, subscribe, subscriptionParams);
+        console.log(action);
         if (action !== null) {
             let conxConfig = this.safeValue (action, 'conx-config', {});
             conxConfig['verbose'] = this.verbose;

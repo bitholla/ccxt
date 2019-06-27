@@ -4,13 +4,17 @@
 
 const Exchange = require ('./base/Exchange');
 const { BadRequest, AuthenticationError, ExchangeError, NetworkError, ArgumentsRequired, OrderNotFound, NotSupported } = require ('./base/errors');
-const hollaex = require('hollaex-node-lib');
+const io = require('socket.io-client');
 
 //  ---------------------------------------------------------------------------
 
 module.exports = class hollaex extends Exchange {
     constuctor () {
-        this.subscriptions = [];
+        this.subscriptions = {
+            'ob': [],
+            'trade': [],
+        }
+        this.socket = undefined;
     }
 
     describe () {
@@ -92,30 +96,6 @@ module.exports = class hollaex extends Exchange {
                 'trading': {
                     'tierBased': true,
                     'percentage': true,
-                },
-            },
-            'wsconf': {
-                'conx-tpls': {
-                    'default': {
-                        'type': 'socket-io',
-                        'baseurl': 'https://api.hollaex.com/realtime',
-                    },
-                },
-                'events': {
-                    'ob': {
-                        'conx-tpl': 'default',
-                        'conx-param': {
-                            'url': '{baseurl}',
-                            'id': '{id}',
-                        },
-                    },
-                    // 'trade': {
-                    //     'conx-tpl': 'default',
-                    //     'conx-param': {
-                    //         'url': '{baseurl}',
-                    //         'id': '{id}',
-                    //     },
-                    // },
                 },
             },
             'exceptions': {
@@ -785,16 +765,92 @@ module.exports = class hollaex extends Exchange {
     }
 
     async websocketSubscribeAll (eventSymbols) {
-        let promise = new Promsie (async (resolve, reject) => {
-            try {
-                for (let eventSymbol of eventSymbols) {
-                    if (eventSymbol['event'] !== 'ob') {
-                        reject (new ExchangeError (`Not valid event ${event} for exchange ${this.id}`));
-                        return;
-                    }
-                }
-                
+        let promise = await new Promise (async (resolve, reject) => {
+            await this.loadMarkets ();
+            if (this.socket === undefined) {
+                this.socket = await io('https://api.hollaex.com/realtime');
             }
+            for (let eventSymbol of eventSymbols) {
+                if (eventSymbol['event'] !== 'ob' && eventSymbol['event'] !== 'trade') {
+                    reject (new ExchangeError (`Not valid event ${event} for exchange ${this.id}`));
+                    return;
+                }
+            }
+            for (let eventSymbol of eventSymbols) {
+                let event;
+                if (eventSymbol.event === 'ob') {
+                    event = 'orderbook'
+                } else if (eventSymbol.event === 'trade') {
+                    event = 'trades'
+                }
+                await this.subscriptions[event].push(eventSymbol.symbol);
+                this.socket.on(event, async (data) => {
+                    let exchangeSymbol = data['symbol'] ? data['symbol'] : await Object.keys(data).filter(key => key.includes('-'))[0];
+                    if (this.subscriptions[event].includes(this.convertSymbol(exchangeSymbol))) {
+                        if (event === 'orderbook') {
+                            let ob = this.websocketParseOrderBook(data[exchangeSymbol]);
+                            this.emit('ob', this.convertSymbol(exchangeSymbol), ob);
+                        } else if (event === 'trades') {
+                            let trade = this.websocketParseTrade(data[exchangeSymbol][0], this.market(this.convertSymbol(exchangeSymbol)));
+                            this.emit('trade', this.convertSymbol(exchangeSymbol), trade);
+                        }
+                    }
+                })
+            }
+            resolve();
         })
+        return promise;
+    }
+
+    convertSymbol (symbol) {
+        return symbol.replace('-', '/').toUpperCase();
+    }
+
+    websocketParseOrderBook (response) {
+        let datetime = this.safeString (response, 'timestamp');
+        let timestamp = this.parse8601 (datetime);
+        let result = {
+            'bids': response['bids'],
+            'asks': response['asks'],
+            'timestamp': timestamp,
+            'datetime': datetime,
+            'nonce': this.milliseconds (),
+        };
+        return result;
+    }
+
+    websocketParseTrade (trade, market = undefined) {
+        let symbol = undefined;
+        if (market !== undefined) {
+            symbol = market['symbol'];
+        }
+        let info = trade;
+        let id = undefined;
+        let datetime = this.safeString (trade, 'timestamp');
+        let timestamp = this.parse8601 (datetime);
+        let order = undefined;
+        let type = undefined;
+        let side = this.safeString (trade, 'side');
+        let takerOrMaker = undefined;
+        let price = this.safeFloat (trade, 'price');
+        let amount = this.safeFloat (trade, 'size');
+        let cost = parseFloat (this.amountToPrecision (symbol, price * amount));
+        let fee = undefined;
+        let result = {
+            'info': info,
+            'id': id,
+            'timestamp': timestamp,
+            'datetime': datetime,
+            'symbol': symbol,
+            'order': order,
+            'type': type,
+            'side': side,
+            'takerOrMaker': takerOrMaker,
+            'price': price,
+            'amount': amount,
+            'cost': cost,
+            'fee': fee,
+        };
+        return result;
     }
 };

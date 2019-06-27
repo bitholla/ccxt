@@ -34,10 +34,11 @@ module.exports = class SocketIoConnection extends WebsocketBaseConnection {
             };
             client.ws = io(this.options.url);
 
-            client.ws.on('connect', () => {
-                // if (this.options['wait-after-connect']) {
-                //     await sleep(this.options['wait-after-connect']);
-                // }
+            client.ws.on('connect', async () => {
+                if (this.options['wait-after-connect']) {
+                    await sleep(this.options['wait-after-connect']);
+                }
+                // console.log('connected');
                 this.emit ('open');
                 resolve();
             });
@@ -61,10 +62,12 @@ module.exports = class SocketIoConnection extends WebsocketBaseConnection {
             });
 
             client.ws.on('orderbook', async (data) => {
+                // console.log(this.channels);
                 if (!client.isClosing) {
                     let exchangeSymbol = data['symbol'] ? data['symbol'] : await Object.keys(data).filter(key => key.includes('-'))[0];
                     let symbol = await convertSymbol(exchangeSymbol);
                     if (this.channels.includes(`orderbook_${symbol}`)){
+                        // console.log('emit');
                         this.emit('message', JSON.stringify({
                             event: 'data',
                             channel: `orderbook_${symbol}`,
