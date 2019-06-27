@@ -46,5 +46,9 @@ async function main () {
         console.log('received');
         console.log(market, ob);
     })
+
+    setTimeout(() => {
+        hollaex.websocketUnsubscribe('trade', 'BTC/EUR');
+    }, 10000)
 };
 main();

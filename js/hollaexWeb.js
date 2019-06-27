@@ -764,8 +764,8 @@ module.exports = class hollaex extends Exchange {
         }]);
     }
 
-    async websocketSubscribeAll (eventSymbols) {
-        let promise = await new Promise (async (resolve, reject) => {
+    websocketSubscribeAll (eventSymbols) {
+        let promise = new Promise (async (resolve, reject) => {
             await this.loadMarkets ();
             for (let eventSymbol of eventSymbols) {
                 let market = this.market (eventSymbol.symbol);
@@ -861,51 +861,49 @@ module.exports = class hollaex extends Exchange {
         }
     }
 
-    // async websocketUnsubscribe (event, symbol, params = {}) {
-    //     await this.websocketUnsubscribeAll([{
-    //         'event': event,
-    //         'symbol': symbol,
-    //         'params': params
-    //     }]);
-    // }
+    async websocketUnsubscribe (event, symbol, params = {}) {
+        await this.websocketUnsubscribeAll([{
+            'event': event,
+            'symbol': symbol,
+            'params': params
+        }]);
+    }
 
-    // websocketUnsubscribeAll (eventSymbols) {
-    //     let promise = new Promise (async (resolve, reject) => {
-    //         try {
-    //             for (let eventSymbol of eventSymbols){
-    //                 if (!this._websocketValidEvent(eventSymbol['event'])) {
-    //                     reject(new ExchangeError ('Not valid event ' + eventSymbol['event'] + ' for exchange ' + this.id));
-    //                     return;
-    //                 }
-    //             }
-    //             for (let eventSymbol of eventSymbols) {
-    //                 let event = eventSymbol['event'];
-    //                 let symbol = eventSymbol['symbol'];
-    //                 let params = eventSymbol['params'];
-
-    //                 let conxid = await this._websocketEnsureConxActive (event, symbol, false);
-    //                 const oid = this.nonce();// + '-' + symbol + '-ob-subscribe';
-    //                 this.once (oid.toString(), (success, ex = null) => {
-    //                     if (success) {
-    //                         this._contextSetSubscribed(conxid, event, symbol, false);
-    //                         this._contextSetSubscribing(conxid, event, symbol, false);
-    //                         resolve ();
-    //                     } else {
-    //                         if (ex != null) {
-    //                             reject (ex);
-    //                         } else {
-    //                             reject (new ExchangeError ('error unsubscribing to ' + event + '(' + symbol + ') ' + this.id));
-    //                         }
-    //                     }
-    //                 });
-    //                 this._websocketUnsubscribe (conxid, event, symbol, oid,params);
-    //             }
-    //         } catch (ex) {
-    //             reject (ex);
-    //         } finally {
-    //             await this._websocketConnectDelayed();
-    //         }
-    //     });
-    //     return this.timeoutPromise (promise, 'websocketUnsubscribe');
-    // }
+    websocketUnsubscribeAll (eventSymbols) {
+        let promise = new Promise (async (resolve, reject) => {
+            for (let eventSymbol of eventSymbols){
+                let event;
+                if (eventSymbol['event'] !== 'ob' && eventSymbol['event'] !== 'trade') {
+                    reject(new ExchangeError ('Not valid event ' + eventSymbol['event'] + ' for exchange ' + this.id));
+                    break;
+                }
+                if (eventSymbol['event'] === 'ob') {
+                    event = 'orderbook';
+                } else if (eventSymbol['event'] === 'trade'){
+                    event = 'trades';
+                }
+                if (!this.subscriptions[event].includes(eventSymbol['symbol'])) {
+                    reject(new ExchangeError (eventSymbol['symbol'] + ' not subscribed to for exchange ' + this.id));
+                    return;
+                }
+            }
+            for (let eventSymbol of eventSymbols) {
+                let event;
+                if (eventSymbol['event'] === 'ob') {
+                    event = 'orderbook';
+                } else if (eventSymbol['event'] === 'trade'){
+                    event = 'trades';
+                }
+                let symbol = eventSymbol['symbol'];
+                let params = eventSymbol['params'];
+                console.log(this.subscriptions);
+                this.subscriptions[event] = this.subscriptions[event].filter((sub) => {
+                    return sub !== symbol;
+                })
+                console.log(this.subscriptions)
+            }
+            resolve();
+        });
+        return promise;
+    }
 };
