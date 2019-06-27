@@ -3,7 +3,7 @@
 //  ---------------------------------------------------------------------------
 
 const Exchange = require ('./base/Exchange');
-const { BadRequest, AuthenticationError, NetworkError, ArgumentsRequired, OrderNotFound, NotSupported } = require ('./base/errors');
+const { BadRequest, AuthenticationError, ExchangeError, NetworkError, ArgumentsRequired, OrderNotFound, NotSupported } = require ('./base/errors');
 const hollaex = require('hollaex-node-lib');
 
 //  ---------------------------------------------------------------------------
@@ -776,25 +776,25 @@ module.exports = class hollaex extends Exchange {
         }
     }
 
-    _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
-        if (event !== 'ob') {
-            throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
-        }
-         // save nonce for subscription response
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
-        if (!('sub-nonces' in symbolData)) {
-            symbolData['sub-nonces'] = {};
-        }
-        symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
-        let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
-        let channel = undefined;
-        symbolData['sub-nonces'][nonceStr] = handle;
-        this._contextSetSymbolData (contextId, event, symbol, symbolData);
-        // send request
-        if (event === 'ob') {
-            channel = `orderbook_${symbol}`;
-        }
-        this.websocketSend(channel);
+    async websocketSubscribe (event, symbol, params = {}) {
+        await this.websocketSubscribeAll ([{
+            'event': event,
+            'symbol': symbol,
+            'params': params,
+        }]);
+    }
+
+    async websocketSubscribeAll (eventSymbols) {
+        let promise = new Promsie (async (resolve, reject) => {
+            try {
+                for (let eventSymbol of eventSymbols) {
+                    if (eventSymbol['event'] !== 'ob') {
+                        reject (new ExchangeError (`Not valid event ${event} for exchange ${this.id}`));
+                        return;
+                    }
+                }
+                
+            }
+        })
     }
 };

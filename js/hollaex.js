@@ -107,13 +107,13 @@ module.exports = class hollaex extends Exchange {
                             'id': '{id}',
                         },
                     },
-                    // 'trade': {
-                    //     'conx-tpl': 'default',
-                    //     'conx-param': {
-                    //         'url': '{baseurl}',
-                    //         'id': '{id}',
-                    //     },
-                    // },
+                    'trade': {
+                        'conx-tpl': 'default',
+                        'conx-param': {
+                            'url': '{baseurl}',
+                            'id': '{id}',
+                        },
+                    },
                 },
             },
             'exceptions': {
@@ -775,7 +775,7 @@ module.exports = class hollaex extends Exchange {
     }
 
     _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
-        if (event !== 'ob') {
+        if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
         // save nonce for subscription response
@@ -785,13 +785,15 @@ module.exports = class hollaex extends Exchange {
         }
         symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
         let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, this.timeout * 999, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
+        let handle = this._setTimeout (contextId, 9999999, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
         let channel = undefined;
         symbolData['sub-nonces'][nonceStr] = handle;
         this._contextSetSymbolData (contextId, event, symbol, symbolData);
         // send request
         if (event === 'ob') {
             channel = `orderbook_${symbol}`;
+        } else if (event === 'trade') {
+            channel = `trade_${symbol}`;
         }
         this.websocketSend ({
             'event': 'subscribe',
@@ -808,9 +810,9 @@ module.exports = class hollaex extends Exchange {
             let chan = this.safeString (msg, 'channel');
             if (chan.indexOf ('orderbook') >= 0) {
                 this._websocketHandleOrderbook (contextId, msg);
+            } else if (chan.indexOf ('trade') >= 0) {
+                this._websocketHandleTrade (contextId, msg);
             }
-        } else if (evt === 'trade') {
-            this._websocketHandleTrade (contextId, msg);
         }
     }
 
@@ -828,6 +830,33 @@ module.exports = class hollaex extends Exchange {
         symbolData['ob'] = ob;
         this.emit ('ob', symbol, ob);
         this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+    }
+
+    _websocketHandleTrade (contextId, msg) {
+        // msg example: {'event': 'trade', 'channel': 'live_trades_btceur', 'data': {'microtimestamp': '1551914592860723', 'amount': 0.06388482, 'buy_order_id': 2967695978, 'sell_order_id': 2967695603, 'amount_str': '0.06388482', 'price_str': '3407.43', 'timestamp': '1551914592', 'price': 3407.43, 'type': 0, 'id': 83631877}}
+        let chan = this.safeString (msg, 'channel');
+        let parts = chan.split ('_');
+        let id = parts[1];
+        let symbol = this.findSymbol (id);
+        let data = this.safeValue (msg, 'data');
+        let trade = this._websocketParseTrade (data, symbol);
+        this.emit ('trade', symbol, trade);
+    }
+
+    _websocketParseTrade (data, symbol) {
+        let datetime = this.safeString (data, 'timestamp');
+        let timestamp = this.parse8601 (datetime);
+        let side = this.safeString (data, 'side');
+        return {
+            'info': data,
+            'timestamp': timestamp,
+            'datetime': dattime,
+            'symbol': symbol,
+            'type': undefined,
+            'side': side,
+            'price': this.safeFloat (data, 'price'),
+            'amount': this.safeFloat (data, 'size'),
+        };
     }
 
     _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {

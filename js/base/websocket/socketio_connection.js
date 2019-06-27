@@ -10,11 +10,11 @@ function convertSymbol (symbol) {
 
 const { sleep } = require ('../functions')
 
-module.exports = class WebsocketConnection extends WebsocketBaseConnection {
+module.exports = class SocketIoConnection extends WebsocketBaseConnection {
     constructor (options, timeout) {
         super();
         this.options = options;
-        this.timeout = timeout;
+        this.timeout = 99999999;
         this.channels = [];
         this.client = {
             ws: null,
@@ -59,11 +59,8 @@ module.exports = class WebsocketConnection extends WebsocketBaseConnection {
                 }
                 reject(error);
             });
-        
+
             client.ws.on('orderbook', async (data) => {
-                // if (this.options['verbose']){
-                //     console.log("WebsocketConnection: "+data);
-                // }
                 if (!client.isClosing) {
                     let exchangeSymbol = data['symbol'] ? data['symbol'] : await Object.keys(data).filter(key => key.includes('-'))[0];
                     let symbol = await convertSymbol(exchangeSymbol);
@@ -77,6 +74,21 @@ module.exports = class WebsocketConnection extends WebsocketBaseConnection {
                 }
                 resolve();
             });
+
+            client.ws.on('trades', async (data) => {
+                if (!client.isClosing) {
+                    let exchangeSymbol = data['symbol'] ? data['symbol'] : await Object.keys(data).filter(key => key.includes('-'))[0];
+                    let symbol = await convertSymbol(exchangeSymbol);
+                    if (this.channels.includes(`trade_${symbol}`)){
+                        this.emit('message', JSON.stringify({
+                            event: 'data',
+                            channel: `trade_${symbol}`,
+                            data: data[exchangeSymbol][0]
+                        }));
+                    }
+                }
+                resolve();
+            })
             this.client = client;
         });
     }
