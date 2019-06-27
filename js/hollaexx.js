@@ -8,7 +8,7 @@ const io = require('socket.io-client');
 
 //  ---------------------------------------------------------------------------
 
-module.exports = class hollaex extends Exchange {
+module.exports = class hollaexx extends Exchange {
     constuctor () {
         this.subscriptions = {
             'ob': [],
@@ -896,11 +896,9 @@ module.exports = class hollaex extends Exchange {
                 }
                 let symbol = eventSymbol['symbol'];
                 let params = eventSymbol['params'];
-                console.log(this.subscriptions);
                 this.subscriptions[event] = this.subscriptions[event].filter((sub) => {
                     return sub !== symbol;
                 })
-                console.log(this.subscriptions)
             }
             resolve();
         });

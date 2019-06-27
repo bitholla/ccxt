@@ -31,7 +31,7 @@
 // };
 // main();
 
-const hollaWeb = require('./js/hollaexWeb');
+const hollaWeb = require('./js/hollaexx');
 const hollaex = new hollaWeb();
 async function main () {
     // await bitstamp.loadMarkets();
@@ -52,3 +52,25 @@ async function main () {
     }, 10000)
 };
 main();
+
+// const binancee = require('./js/binance');
+// const binance = new binancee();
+// async function main () {
+//     await binance.loadMarkets();
+//     // await hollaex.websocketSubscribe('ob', 'BTC/EUR');
+//     await binance.websocketSubscribeAll([{
+//         'event': 'trade',
+//         'symbol': 'BTC/USDT'
+//     }]).catch((e) => {
+//         console.log(e);
+//     });
+//     binance.on('trade', (market, ob) => {
+//         console.log('received');
+//         console.log(market, ob);
+//     })
+
+//     setTimeout(() => {
+//         binance.websocketUnsubscribe('trade', 'BTC/EUR');
+//     }, 10000)
+// };
+// main();
