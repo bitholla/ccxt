@@ -766,15 +766,15 @@ module.exports = class hollaex extends Exchange {
 
     async websocketSubscribeAll (eventSymbols) {
         let promise = await new Promise (async (resolve, reject) => {
-            await this.loadMarkets ();
-            if (this.socket === undefined) {
-                this.socket = await io('https://api.hollaex.com/realtime');
-            }
             for (let eventSymbol of eventSymbols) {
                 if (eventSymbol['event'] !== 'ob' && eventSymbol['event'] !== 'trade') {
                     reject (new ExchangeError (`Not valid event ${event} for exchange ${this.id}`));
                     return;
                 }
+            }
+            await this.loadMarkets ();
+            if (this.socket === undefined) {
+                this.socket = await io('https://api.hollaex.com/realtime');
             }
             for (let eventSymbol of eventSymbols) {
                 let event;
@@ -791,7 +791,7 @@ module.exports = class hollaex extends Exchange {
                             let ob = this.websocketParseOrderBook(data[exchangeSymbol]);
                             this.emit('ob', this.convertSymbol(exchangeSymbol), ob);
                         } else if (event === 'trades') {
-                            let trade = this.websocketParseTrade(data[exchangeSymbol][0], this.market(this.convertSymbol(exchangeSymbol)));
+                            let trade = this.websocketParseTrade(data[exchangeSymbol], this.market(this.convertSymbol(exchangeSymbol)));
                             this.emit('trade', this.convertSymbol(exchangeSymbol), trade);
                         }
                     }
@@ -819,38 +819,46 @@ module.exports = class hollaex extends Exchange {
         return result;
     }
 
-    websocketParseTrade (trade, market = undefined) {
-        let symbol = undefined;
-        if (market !== undefined) {
-            symbol = market['symbol'];
+    websocketParseTrade (trades, market = undefined) {
+        let response = [];
+        trades.forEach((trade) => {
+            let symbol = undefined;
+            if (market !== undefined) {
+                symbol = market['symbol'];
+            }
+            let info = trade;
+            let id = undefined;
+            let datetime = this.safeString (trade, 'timestamp');
+            let timestamp = this.parse8601 (datetime);
+            let order = undefined;
+            let type = undefined;
+            let side = this.safeString (trade, 'side');
+            let takerOrMaker = undefined;
+            let price = this.safeFloat (trade, 'price');
+            let amount = this.safeFloat (trade, 'size');
+            let cost = parseFloat (this.amountToPrecision (symbol, price * amount));
+            let fee = undefined;
+            let result = {
+                'info': info,
+                'id': id,
+                'timestamp': timestamp,
+                'datetime': datetime,
+                'symbol': symbol,
+                'order': order,
+                'type': type,
+                'side': side,
+                'takerOrMaker': takerOrMaker,
+                'price': price,
+                'amount': amount,
+                'cost': cost,
+                'fee': fee,
+            };
+            response.push(result);
+        })
+        if (response.length > 1) {
+            return response;
+        } else {
+            return response[0]
         }
-        let info = trade;
-        let id = undefined;
-        let datetime = this.safeString (trade, 'timestamp');
-        let timestamp = this.parse8601 (datetime);
-        let order = undefined;
-        let type = undefined;
-        let side = this.safeString (trade, 'side');
-        let takerOrMaker = undefined;
-        let price = this.safeFloat (trade, 'price');
-        let amount = this.safeFloat (trade, 'size');
-        let cost = parseFloat (this.amountToPrecision (symbol, price * amount));
-        let fee = undefined;
-        let result = {
-            'info': info,
-            'id': id,
-            'timestamp': timestamp,
-            'datetime': datetime,
-            'symbol': symbol,
-            'order': order,
-            'type': type,
-            'side': side,
-            'takerOrMaker': takerOrMaker,
-            'price': price,
-            'amount': amount,
-            'cost': cost,
-            'fee': fee,
-        };
-        return result;
     }
 };
