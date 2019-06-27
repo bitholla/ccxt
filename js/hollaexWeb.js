@@ -766,13 +766,14 @@ module.exports = class hollaex extends Exchange {
 
     async websocketSubscribeAll (eventSymbols) {
         let promise = await new Promise (async (resolve, reject) => {
+            await this.loadMarkets ();
             for (let eventSymbol of eventSymbols) {
+                let market = this.market (eventSymbol.symbol);
                 if (eventSymbol['event'] !== 'ob' && eventSymbol['event'] !== 'trade') {
                     reject (new ExchangeError (`Not valid event ${event} for exchange ${this.id}`));
                     return;
                 }
             }
-            await this.loadMarkets ();
             if (this.socket === undefined) {
                 this.socket = await io('https://api.hollaex.com/realtime');
             }
@@ -784,19 +785,21 @@ module.exports = class hollaex extends Exchange {
                     event = 'trades'
                 }
                 await this.subscriptions[event].push(eventSymbol.symbol);
-                this.socket.on(event, async (data) => {
-                    let exchangeSymbol = data['symbol'] ? data['symbol'] : await Object.keys(data).filter(key => key.includes('-'))[0];
-                    if (this.subscriptions[event].includes(this.convertSymbol(exchangeSymbol))) {
-                        if (event === 'orderbook') {
-                            let ob = this.websocketParseOrderBook(data[exchangeSymbol]);
-                            this.emit('ob', this.convertSymbol(exchangeSymbol), ob);
-                        } else if (event === 'trades') {
-                            let trade = this.websocketParseTrade(data[exchangeSymbol], this.market(this.convertSymbol(exchangeSymbol)));
-                            this.emit('trade', this.convertSymbol(exchangeSymbol), trade);
-                        }
-                    }
-                })
             }
+            this.socket.on('orderbook', async (data) => {
+                let exchangeSymbol = data['symbol'] ? data['symbol'] : await Object.keys(data).filter(key => key.includes('-'))[0];
+                if (this.subscriptions['orderbook'].includes(this.convertSymbol(exchangeSymbol))) {
+                    let ob = this.websocketParseOrderBook(data[exchangeSymbol]);
+                    this.emit('ob', this.convertSymbol(exchangeSymbol), ob);
+                }
+            })
+            this.socket.on('trades', async (data) => {
+                let exchangeSymbol = data['symbol'] ? data['symbol'] : await Object.keys(data).filter(key => key.includes('-'))[0];
+                if (this.subscriptions['trades'].includes(this.convertSymbol(exchangeSymbol))) {
+                    let trade = this.websocketParseTrade(data[exchangeSymbol], this.convertSymbol(exchangeSymbol));
+                    this.emit('trade', this.convertSymbol(exchangeSymbol), trade);
+                }
+            })
             resolve();
         })
         return promise;
@@ -819,13 +822,9 @@ module.exports = class hollaex extends Exchange {
         return result;
     }
 
-    websocketParseTrade (trades, market = undefined) {
+    websocketParseTrade (trades, symbol = undefined) {
         let response = [];
         trades.forEach((trade) => {
-            let symbol = undefined;
-            if (market !== undefined) {
-                symbol = market['symbol'];
-            }
             let info = trade;
             let id = undefined;
             let datetime = this.safeString (trade, 'timestamp');
@@ -861,4 +860,52 @@ module.exports = class hollaex extends Exchange {
             return response[0]
         }
     }
+
+    // async websocketUnsubscribe (event, symbol, params = {}) {
+    //     await this.websocketUnsubscribeAll([{
+    //         'event': event,
+    //         'symbol': symbol,
+    //         'params': params
+    //     }]);
+    // }
+
+    // websocketUnsubscribeAll (eventSymbols) {
+    //     let promise = new Promise (async (resolve, reject) => {
+    //         try {
+    //             for (let eventSymbol of eventSymbols){
+    //                 if (!this._websocketValidEvent(eventSymbol['event'])) {
+    //                     reject(new ExchangeError ('Not valid event ' + eventSymbol['event'] + ' for exchange ' + this.id));
+    //                     return;
+    //                 }
+    //             }
+    //             for (let eventSymbol of eventSymbols) {
+    //                 let event = eventSymbol['event'];
+    //                 let symbol = eventSymbol['symbol'];
+    //                 let params = eventSymbol['params'];
+
+    //                 let conxid = await this._websocketEnsureConxActive (event, symbol, false);
+    //                 const oid = this.nonce();// + '-' + symbol + '-ob-subscribe';
+    //                 this.once (oid.toString(), (success, ex = null) => {
+    //                     if (success) {
+    //                         this._contextSetSubscribed(conxid, event, symbol, false);
+    //                         this._contextSetSubscribing(conxid, event, symbol, false);
+    //                         resolve ();
+    //                     } else {
+    //                         if (ex != null) {
+    //                             reject (ex);
+    //                         } else {
+    //                             reject (new ExchangeError ('error unsubscribing to ' + event + '(' + symbol + ') ' + this.id));
+    //                         }
+    //                     }
+    //                 });
+    //                 this._websocketUnsubscribe (conxid, event, symbol, oid,params);
+    //             }
+    //         } catch (ex) {
+    //             reject (ex);
+    //         } finally {
+    //             await this._websocketConnectDelayed();
+    //         }
+    //     });
+    //     return this.timeoutPromise (promise, 'websocketUnsubscribe');
+    // }
 };
