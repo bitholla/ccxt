@@ -786,6 +786,18 @@ module.exports = class hollaexx extends Exchange {
                 }
                 await this.subscriptions[event].push(eventSymbol.symbol);
             }
+            this.socket.on('connect', async () => {
+                this.emit('open');
+                resolve();
+            })
+            this.socket.on('connect-error', (error) => {
+                this.emit('err', error);
+                reject(error);
+            })
+            this.socket.on('disconnect', () => {
+                this.emit('close');
+                reject('closing');
+            });
             this.socket.on('orderbook', async (data) => {
                 let exchangeSymbol = data['symbol'] ? data['symbol'] : await Object.keys(data).filter(key => key.includes('-'))[0];
                 if (this.subscriptions['orderbook'].includes(this.convertSymbol(exchangeSymbol))) {

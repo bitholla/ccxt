@@ -49,7 +49,7 @@ async function main () {
 
     setTimeout(() => {
         hollaex.websocketUnsubscribe('trade', 'BTC/EUR');
-    }, 10000)
+    }, 20000)
 };
 main();
 
