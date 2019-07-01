@@ -92,12 +92,13 @@ module.exports = class hollaex extends Exchange {
             'wsconf': {
                 'conx-tpls': {
                     'default': {
-                        'type': 'socket-io',
+                        'type': 'ws-s',
                         'baseurl': 'https://api.hollaex.com/realtime',
                     },
                 },
                 'methodmap': {
-                    '_websocketTimeoutRemoveNonce': '_websocketTimeoutRemoveNonce',
+                    'fetchOrderBook': 'fetchOrderBook',
+                    '_websocketHandleObRestSnapshot': '_websocketHandleObRestSnapshot',
                 },
                 'events': {
                     'ob': {
@@ -774,45 +775,78 @@ module.exports = class hollaex extends Exchange {
         }
     }
 
-    _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
+    async _websocketSubscribe (contextId, event, symbol, nonce, params = {}) {
         if (event !== 'ob' && event !== 'trade') {
             throw new NotSupported ('subscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        // save nonce for subscription response
-        let symbolData = this._contextGetSymbolData (contextId, event, symbol);
-        if (!('sub-nonces' in symbolData)) {
-            symbolData['sub-nonces'] = {};
-        }
-        symbolData['limit'] = this.safeInteger (params, 'limit', undefined);
+        await this._contextSet (contextId, 'symbol', symbol);
         let nonceStr = nonce.toString ();
-        let handle = this._setTimeout (contextId, 9999999, this._websocketMethodMap ('_websocketTimeoutRemoveNonce'), [contextId, nonceStr, event, symbol, 'sub-nonce']);
-        let channel = undefined;
-        symbolData['sub-nonces'][nonceStr] = handle;
-        this._contextSetSymbolData (contextId, event, symbol, symbolData);
-        // send request
-        if (event === 'ob') {
-            channel = `orderbook_${symbol}`;
-        } else if (event === 'trade') {
-            channel = `trade_${symbol}`;
+        this.emit (nonceStr, true);
+    }
+
+    _websocketUnsubscribe (contextId, event, symbol, nonce, params = {}) {
+        if (event !== 'ob' && event !== 'trade') {
+            throw new NotSupported ('unsubscribe ' + event + '(' + symbol + ') not supported for exchange ' + this.id);
         }
-        this.websocketSend ({
-            'event': 'subscribe',
-            'channel': channel,
-        }, contextId);
+        let nonceStr = nonce.toString ();
+        this.emit (nonceStr, true);
+    }
+
+    // _websocketOnOpen (contextId, websocketConexConfig) {
+    //     console.log(websocketConexConfig);
+    //     // symbol = this.findSymbol (symbol);
+    //     // this._contextSet (contextId, 'symbol', symbol);
+    // }
+
+    convertSymbol (symbol) {
+        return symbol.replace('-', '/').toUpperCase();
     }
 
     _websocketOnMessage (contextId, data) {
-        let msg = JSON.parse (data);
-        let evt = this.safeString (msg, 'event');
-        if (evt === 'subscription') {
-            this._websocketHandleSubscription (contextId, msg);
-        } else if (evt === 'data') {
-            let chan = this.safeString (msg, 'channel');
-            if (chan.indexOf ('orderbook') >= 0) {
-                this._websocketHandleOrderbook (contextId, msg);
-            } else if (chan.indexOf ('trade') >= 0) {
-                this._websocketHandleTrade (contextId, msg);
+        let symbol = this._contextGet (contextId, 'symbol');
+        let symbolData = undefined;
+        let obEventActive = false;
+        let dataSymbol = undefined;
+        let events = this.safeString (data, 'action');
+        if (events === 'partial') {
+            dataSymbol = Object.keys (data).filter(key => key.includes('-'))[0];
+        } else {
+            dataSymbol = data['symbol'];
+        }
+        let convertedSymbol = this.convertSymbol(dataSymbol);
+        let subscribedEvents = this._contextGetEvents (contextId);
+        if ('ob' in subscribedEvents) {
+            obEventActive = true;
+            if (events === 'partial') {
+                symbolData = {
+                    'bids': data[dataSymbol]['bids'],
+                    'asks': data[dataSymbol]['asks'],
+                    'datetime': data[dataSymbol]['timestamp'],
+                    'timestamp': this.parse8601 (data[dataSymbol]['timestamp']),
+                    'nonce': this.milliseconds()
+                };
+                // this._contextSetSymbolData (contextId, 'ob', convertedSymbol, symbolData);
+            } else if (events === 'update') {
+                symbolData = this._contextGetSymbolData (contextId, 'ob', convertedSymbol);
+                let timestamp = this.safeString (data, 'timestamp');
+                symbolData['bids'] = data[dataSymbol]['bids'];
+                symbolData['asks'] = data[dataSymbol]['asks'];
+                symbolData['timestamp'] = this.parse8601 (timestamp);
+                symbolData['datetime'] = timestamp;
+                symbolData['nonce'] = this.milliseconds();
+                // this._contextSetSymbolData (contextId, 'ob', convertedSymbol, symbolData);
             }
+        };
+        // if (events === 'update' && obEventActive) {
+        //     let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        //     symbolData[
+        //     this.updateBidAsk ([price, size], symbolData['ob'][keySide], side === 'bid');
+        // } else if (eventType === 'trade' && ('trade' in subscribedEvents)) {
+        //     this._websocketHandleTrade (msg, event, symbol);
+        // }
+        if (obEventActive) {
+            this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit'])); // True even with 'trade', as a trade event has the corresponding ob change event in the same events list
+            this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
         }
     }
 
@@ -850,13 +884,30 @@ module.exports = class hollaex extends Exchange {
         return {
             'info': data,
             'timestamp': timestamp,
-            'datetime': dattime,
+            'datetime': datetime,
             'symbol': symbol,
             'type': undefined,
             'side': side,
             'price': this.safeFloat (data, 'price'),
             'amount': this.safeFloat (data, 'size'),
         };
+    }
+
+    _websocketGenerateUrlStream (events, options, params = {}) {
+        // check all events has the same symbol and build parameter list
+        let symbol = undefined;
+        for (let i = 0; i < events.length; i++) {
+            let event = events[i];
+            if (!symbol) {
+                symbol = event['symbol'];
+            } else if (symbol !== event['symbol']) {
+                throw new ExchangeError ('invalid configuration: not same symbol in event list: ' + symbol + ' ' + event['symbol']);
+            }
+            if (event['event'] !== 'ob' && event['event'] !== 'trade') {
+                throw new ExchangeError ('invalid configuration: event not reconigzed ' + event['event']);
+            }
+        }
+        return options['url'];
     }
 
     _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {
@@ -869,35 +920,4 @@ module.exports = class hollaex extends Exchange {
             }
         }
     }
-
-    // _websocketHandleSubscription (contextId, msg) {
-    //     console.log(msg);
-    //     let chan = this.safeString (msg, 'channel');
-    //     let event = undefined;
-    //     if (chan.indexOf ('order_book') >= 0) {
-    //         event = 'ob';
-    //     } else {
-    //         event = undefined;
-    //     }
-    //     if (typeof event !== 'undefined') {
-    //         let parts = chan.split ('_');
-    //         let id = 'btcusd';
-    //         if (parts.length > 2) {
-    //             id = parts[2];
-    //         }
-    //         let symbol = this.findSymbol (id);
-    //         let symbolData = this._contextGetSymbolData (contextId, event, symbol);
-    //         if ('sub-nonces' in symbolData) {
-    //             let nonces = symbolData['sub-nonces'];
-    //             const keys = Object.keys (nonces);
-    //             for (let i = 0; i < keys.length; i++) {
-    //                 let nonce = keys[i];
-    //                 this._cancelTimeout (nonces[nonce]);
-    //                 this.emit (nonce, true);
-    //             }
-    //             symbolData['sub-nonces'] = {};
-    //             this._contextSetSymbolData (contextId, event, symbol, symbolData);
-    //         }
-    //     }
-    // }
 };
