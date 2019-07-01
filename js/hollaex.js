@@ -823,7 +823,7 @@ module.exports = class hollaex extends Exchange {
                     'asks': data[dataSymbol]['asks'],
                     'datetime': data[dataSymbol]['timestamp'],
                     'timestamp': this.parse8601 (data[dataSymbol]['timestamp']),
-                    'nonce': this.milliseconds()
+                    'nonce': this.milliseconds() + Math.floor(Math.random() * Math.floor(10))
                 };
                 // this._contextSetSymbolData (contextId, 'ob', convertedSymbol, symbolData);
             } else if (events === 'update') {
@@ -833,7 +833,7 @@ module.exports = class hollaex extends Exchange {
                 symbolData['asks'] = data[dataSymbol]['asks'];
                 symbolData['timestamp'] = this.parse8601 (timestamp);
                 symbolData['datetime'] = timestamp;
-                symbolData['nonce'] = this.milliseconds();
+                symbolData['nonce'] = this.milliseconds() + Math.floor(Math.random() * Math.floor(10));
                 // this._contextSetSymbolData (contextId, 'ob', convertedSymbol, symbolData);
             }
         };
@@ -845,8 +845,8 @@ module.exports = class hollaex extends Exchange {
         //     this._websocketHandleTrade (msg, event, symbol);
         // }
         if (obEventActive) {
-            this.emit ('ob', symbol, this._cloneOrderBook (symbolData['ob'], symbolData['limit'])); // True even with 'trade', as a trade event has the corresponding ob change event in the same events list
-            this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+            this.emit ('ob', convertedSymbol, symbolData); // True even with 'trade', as a trade event has the corresponding ob change event in the same events list
+            this._contextSetSymbolData (contextId, 'ob', convertedSymbol, symbolData);
         }
     }
 
