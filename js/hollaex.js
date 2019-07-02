@@ -781,18 +781,21 @@ module.exports = class hollaex extends Exchange {
                     await this.subscriptions[eventSymbol.event].push(eventSymbol.symbol);
                 }
             }
-            console.log(this.subscriptions);
             this.socket.on('connect', async () => {
-                // this.emit('open');
-                // resolve();
+                this.emit('open');
+                resolve();
             })
             this.socket.on('connect-error', (error) => {
-                // this.emit('err', error);
-                // reject(error);
+                this.emit('err', error);
+                reject(error);
+            })
+            this.socket.on('error', (error) => {
+                this.emit('err', error);
+                reject(error);
             })
             this.socket.on('disconnect', () => {
-                // this.emit('close');
-                // reject('closing');
+                this.emit('close');
+                reject('closing');
             });
             this.socket.on('orderbook', (data) => {
                 let exchangeSymbol = data['symbol'];
@@ -802,7 +805,6 @@ module.exports = class hollaex extends Exchange {
                 }
             })
             this.socket.on('trades', (data) => {
-                console.log(this.subscriptions);
                 let exchangeSymbol = data['symbol'];
                 if (this.subscriptions['trade'].includes(this.convertSymbol(exchangeSymbol))) {
                     let trade = this.websocketParseTrade(data[exchangeSymbol], this.convertSymbol(exchangeSymbol));
