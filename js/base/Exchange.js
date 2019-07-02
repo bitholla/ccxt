@@ -69,7 +69,6 @@ const EventEmitter = require ('events')
 const WebsocketConnection = require ('./websocket/websocket_connection')
 const PusherLightConnection = require ('./websocket/pusherlight_connection')
 const SocketIoLightConnection = require ('./websocket/socketiolight_connection')
-const SocketIoConnection = require ('./websocket/socketio_connection');
 let zlib = require ('zlib');
 
 /*  ------------------------------------------------------------------------ */
@@ -347,7 +346,7 @@ module.exports = class Exchange extends EventEmitter {
         this.subscriptions = {
             'orderbook': [],
             'trades': [],
-        }
+        };
 
         this.arrayConcat = (a, b) => a.concat (b)
 
@@ -1909,16 +1908,9 @@ module.exports = class Exchange extends EventEmitter {
 
     _websocketGetConxid4Event (event, symbol) {
         let eventConf = this.safeValue(this.wsconf['events'], event);
-        // console.log(eventConf);
         let conxParam = this.safeValue (eventConf, 'conx-param', {
             'id': '{id}'
         });
-        // console.log(conxParam);
-        // console.log('implode', this.implodeParams (conxParam['id'], { 
-        //     'event': event,
-        //     'symbol': symbol,
-        //     'id': eventConf['conx-tpl']
-        // }))
         return {
             'conxid' : this.implodeParams (conxParam['id'], { 
                 'event': event,
@@ -1972,13 +1964,6 @@ module.exports = class Exchange extends EventEmitter {
             throw new ExchangeError ("invalid websocket configuration in exchange: " + this.id);
         }
         switch (config['type']) {
-            case 'socket-io':
-                return {
-                    'action': 'connect',
-                    'conx-config': config,
-                    'reset-context': 'onconnect',
-                    'conx-tpl': conxTplName,
-                };
             case 'signalr':
                 return {
                     'action': 'connect',
@@ -2059,7 +2044,6 @@ module.exports = class Exchange extends EventEmitter {
             this._websocketResetContext (conxid, conxtpl);
         }
         let action = this._websocketGetActionForEvent (conxid, event, symbol, subscribe, subscriptionParams);
-        console.log(action);
         if (action !== null) {
             let conxConfig = this.safeValue (action, 'conx-config', {});
             conxConfig['verbose'] = this.verbose;
@@ -2215,9 +2199,6 @@ module.exports = class Exchange extends EventEmitter {
         websocketConfig = await this._websocketOnInit (conxid, websocketConfig);
         websocketConfig['agent'] = this.agent;
         switch (websocketConfig['type']){
-            case 'socket-io':
-                websocketConnectionInfo['conx'] = new SocketIoConnection (websocketConfig, this.timeout);
-                break;
             case 'signalr':
                 websocketConnectionInfo['conx'] = new WebsocketConnection (websocketConfig, this.timeout);
                 break;
@@ -2246,11 +2227,11 @@ module.exports = class Exchange extends EventEmitter {
             // this._websocketResetContext (conxid);
             this.emit ('err', new NetworkError (err), conxid);
         });
-        websocketConnectionInfo['conx'].on ('message', (data, type = undefined) => {
+        websocketConnectionInfo['conx'].on ('message', (data) => {
             if (this.verbose)
                 console.log (conxid + '<-' + data);
             try {
-                this._websocketOnMessage (conxid, data, type);
+                this._websocketOnMessage (conxid, data);
             } catch (ex) {
                 this.emit ('err', ex, conxid);
             }
@@ -2515,7 +2496,7 @@ module.exports = class Exchange extends EventEmitter {
     _websocketOnOpen (contextId, websocketConexConfig) {
     }
 
-    _websocketOnMessage (contextId, data, type) {
+    _websocketOnMessage (contextId, data) {
     }
 
     _websocketOnClose (contextId) {
