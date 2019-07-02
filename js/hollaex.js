@@ -791,7 +791,7 @@ module.exports = class hollaex extends Exchange {
             for (let eventSymbol of eventSymbols) {
                 this.market (eventSymbol.symbol);
                 if (eventSymbol['event'] !== 'ob' && eventSymbol['event'] !== 'trade') {
-                    reject (new ExchangeError (`Not valid event ${eventSymbol['event']} for exchange ${this.id}`));
+                    reject (new NotSupported (`Not valid event ${eventSymbol['event']} for exchange ${this.id}`));
                     return;
                 }
                 if (this.subscriptions[eventSymbol.event].indexOf(eventSymbol.symbol) >= 0) {
@@ -911,7 +911,7 @@ module.exports = class hollaex extends Exchange {
             for (let eventSymbol of eventSymbols){
                 this.market (eventSymbol['symbol']);
                 if (eventSymbol['event'] !== 'ob' && eventSymbol['event'] !== 'trade') {
-                    reject(new ExchangeError ('Not valid event ' + eventSymbol['event'] + ' for exchange ' + this.id));
+                    reject(new NotSupported ('Not valid event ' + eventSymbol['event'] + ' for exchange ' + this.id));
                     return;
                 }
                 if (this.subscriptions[eventSymbol['event']].indexOf(eventSymbol['symbol']) === -1) {
