@@ -757,7 +757,7 @@ module.exports = class hollaex extends Exchange {
         }]);
     }
 
-    websocketSubscribeAll (eventSymbols) {
+    async websocketSubscribeAll (eventSymbols) {
         let promise = new Promise (async (resolve, reject) => {
             await this.loadMarkets ();
             for (let eventSymbol of eventSymbols) {
@@ -777,29 +777,33 @@ module.exports = class hollaex extends Exchange {
                 } else if (eventSymbol.event === 'trade') {
                     event = 'trades'
                 }
-                await this.subscriptions[event].push(eventSymbol.symbol);
+                if (this.subscriptions[event].indexOf(eventSymbol.symbol) === -1) {
+                    await this.subscriptions[event].push(eventSymbol.symbol);
+                }
             }
+            console.log(this.subscriptions);
             this.socket.on('connect', async () => {
-                this.emit('open');
-                resolve();
+                // this.emit('open');
+                // resolve();
             })
             this.socket.on('connect-error', (error) => {
-                this.emit('err', error);
-                reject(error);
+                // this.emit('err', error);
+                // reject(error);
             })
             this.socket.on('disconnect', () => {
-                this.emit('close');
-                reject('closing');
+                // this.emit('close');
+                // reject('closing');
             });
-            this.socket.on('orderbook', async (data) => {
-                let exchangeSymbol = data['symbol'] ? data['symbol'] : await Object.keys(data).filter(key => key.includes('-'))[0];
+            this.socket.on('orderbook', (data) => {
+                let exchangeSymbol = data['symbol'];
                 if (this.subscriptions['orderbook'].includes(this.convertSymbol(exchangeSymbol))) {
                     let ob = this.websocketParseOrderBook(data[exchangeSymbol]);
                     this.emit('ob', this.convertSymbol(exchangeSymbol), ob);
                 }
             })
-            this.socket.on('trades', async (data) => {
-                let exchangeSymbol = data['symbol'] ? data['symbol'] : await Object.keys(data).filter(key => key.includes('-'))[0];
+            this.socket.on('trades', (data) => {
+                console.log('incoming');
+                let exchangeSymbol = data['symbol'];
                 if (this.subscriptions['trades'].includes(this.convertSymbol(exchangeSymbol))) {
                     let trade = this.websocketParseTrade(data[exchangeSymbol], this.convertSymbol(exchangeSymbol));
                     this.emit('trade', this.convertSymbol(exchangeSymbol), trade);
