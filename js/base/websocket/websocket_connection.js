@@ -58,10 +58,21 @@ module.exports = class WebsocketConnection extends WebsocketBaseConnection {
                     }
 
                     if (!client.isClosing) {
-                        this.emit('message', data);
+                        this.emit('message', data, 'ob');
                     }
                     resolve();
                 });
+
+                client.ws.on('trades', async (data) => {
+                    if (this.options['verbose']){
+                        console.log("WebsocketConnection: "+data);
+                    }
+
+                    if (!client.isClosing) {
+                        this.emit('message', data, 'trade');
+                    }
+                    resolve();
+                })
                 this.client = client;
             } else {
                 if (this.options.agent) {
