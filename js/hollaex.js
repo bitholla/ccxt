@@ -3,7 +3,7 @@
 //  ---------------------------------------------------------------------------
 
 const Exchange = require ('./base/Exchange');
-const { BadRequest, AuthenticationError, NetworkError, ArgumentsRequired, OrderNotFound, NotSupported } = require ('./base/errors');
+const { BadRequest, AuthenticationError, NetworkError, ArgumentsRequired, OrderNotFound, NotSupported, ExchangeError } = require ('./base/errors');
 
 //  ---------------------------------------------------------------------------
 
@@ -850,7 +850,6 @@ module.exports = class hollaex extends Exchange {
         //     this._websocketHandleTrade (msg, event, symbol);
         // }
         if (obEventActive) {
-            console.log(symbolData);
             this.emit ('ob', convertedSymbol, symbolData); // True even with 'trade', as a trade event has the corresponding ob change event in the same events list
             this._contextSetSymbolData (contextId, 'ob', convertedSymbol, symbolData);
         }
@@ -901,19 +900,21 @@ module.exports = class hollaex extends Exchange {
 
     _websocketGenerateUrlStream (events, options, params = {}) {
         // check all events has the same symbol and build parameter list
-        let symbol = undefined;
-        for (let i = 0; i < events.length; i++) {
-            let event = events[i];
-            if (!symbol) {
-                symbol = event['symbol'];
-            } else if (symbol !== event['symbol']) {
-                throw new ExchangeError ('invalid configuration: not same symbol in event list: ' + symbol + ' ' + event['symbol']);
-            }
-            if (event['event'] !== 'ob' && event['event'] !== 'trade') {
-                throw new ExchangeError ('invalid configuration: event not reconigzed ' + event['event']);
-            }
-        }
-        return options['url'];
+        // let symbol = undefined;
+        // console.log('events', events);
+        // for (let i = 0; i < events.length; i++) {
+        //     let event = events[i];
+        //     if (!symbol) {
+        //         symbol = event['symbol'];
+        //     } else if (symbol !== event['symbol']) {
+        //         throw new ExchangeError ('invalid configuration: not same symbol in event list: ' + symbol + ' ' + event['symbol']);
+        //     }
+        //     if (event['event'] !== 'ob' && event['event'] !== 'trade') {
+        //         throw new ExchangeError ('invalid configuration: event not reconigzed ' + event['event']);
+        //     }
+        // }
+        // return options['url'];
+        return options['url']
     }
 
     _websocketTimeoutRemoveNonce (contextId, timerNonce, event, symbol, key) {

@@ -31,25 +31,28 @@
 // };
 // main();
 
-const hollaWeb = require('./js/hollaexx');
+const hollaWeb = require('./js/hollaex');
 const hollaex = new hollaWeb();
 async function main () {
-    // await bitstamp.loadMarkets();
+    await hollaex.loadMarkets();
     // await hollaex.websocketSubscribe('ob', 'BTC/EUR');
     await hollaex.websocketSubscribeAll([{
-        'event': 'trade',
+        'event': 'ob',
         'symbol': 'BTC/EUR'
+    },
+    {
+        'event': 'ob',
+        'symbol': 'XRP/EUR'
     }]).catch((e) => {
         console.log(e);
     });
-    hollaex.on('trade', (market, ob) => {
-        console.log('received');
+    hollaex.on('ob', (market, ob) => {
         console.log(market, ob);
     })
 
-    setTimeout(() => {
-        hollaex.websocketUnsubscribe('trade', 'BTC/EUR');
-    }, 20000)
+    // setTimeout(() => {
+    //     hollaex.websocketUnsubscribe('trade', 'BTC/EUR');
+    // }, 20000)
 };
 main();
 
