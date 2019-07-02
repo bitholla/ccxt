@@ -345,8 +345,8 @@ module.exports = class Exchange extends EventEmitter {
 
         this.socket = undefined;
         this.subscriptions = {
-            'orderbook': [],
-            'trades': [],
+            'ob': [],
+            'trade': [],
         };
 
         this.arrayConcat = (a, b) => a.concat (b)

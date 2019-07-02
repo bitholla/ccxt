@@ -750,11 +750,17 @@ module.exports = class hollaex extends Exchange {
     }
 
     async websocketSubscribe (event, symbol, params = {}) {
-        await this.websocketSubscribeAll ([{
-            'event': event,
-            'symbol': symbol,
-            'params': params,
-        }]);
+        if (this.socket) {
+            if (this.subscriptions[event].indexOf(symbol) === -1) {
+                this.subscriptions[event].push(symbol);
+            }
+        } else {
+            await this.websocketSubscribeAll ([{
+                'event': event,
+                'symbol': symbol,
+                'params': params,
+            }]);
+        }
     }
 
     async websocketSubscribeAll (eventSymbols) {
@@ -771,14 +777,8 @@ module.exports = class hollaex extends Exchange {
                 this.socket = await io('https://api.hollaex.com/realtime');
             }
             for (let eventSymbol of eventSymbols) {
-                let event;
-                if (eventSymbol.event === 'ob') {
-                    event = 'orderbook'
-                } else if (eventSymbol.event === 'trade') {
-                    event = 'trades'
-                }
-                if (this.subscriptions[event].indexOf(eventSymbol.symbol) === -1) {
-                    await this.subscriptions[event].push(eventSymbol.symbol);
+                if (this.subscriptions[eventSymbol.event].indexOf(eventSymbol.symbol) === -1) {
+                    await this.subscriptions[eventSymbol.event].push(eventSymbol.symbol);
                 }
             }
             console.log(this.subscriptions);
@@ -796,15 +796,15 @@ module.exports = class hollaex extends Exchange {
             });
             this.socket.on('orderbook', (data) => {
                 let exchangeSymbol = data['symbol'];
-                if (this.subscriptions['orderbook'].includes(this.convertSymbol(exchangeSymbol))) {
+                if (this.subscriptions['ob'].includes(this.convertSymbol(exchangeSymbol))) {
                     let ob = this.websocketParseOrderBook(data[exchangeSymbol]);
                     this.emit('ob', this.convertSymbol(exchangeSymbol), ob);
                 }
             })
             this.socket.on('trades', (data) => {
-                console.log('incoming');
+                console.log(this.subscriptions);
                 let exchangeSymbol = data['symbol'];
-                if (this.subscriptions['trades'].includes(this.convertSymbol(exchangeSymbol))) {
+                if (this.subscriptions['trade'].includes(this.convertSymbol(exchangeSymbol))) {
                     let trade = this.websocketParseTrade(data[exchangeSymbol], this.convertSymbol(exchangeSymbol));
                     this.emit('trade', this.convertSymbol(exchangeSymbol), trade);
                 }

@@ -43,12 +43,17 @@ async function main () {
     {
         'event': 'ob',
         'symbol': 'XRP/EUR'
-    }]).catch((e) => {
-        console.log(e);
-    });
-    hollaex.on('ob', (market, ob) => {
-        console.log(market, ob);
-    })
+    },
+    // {
+    //     'event': 'trade',
+    //     'symbol': 'XRP/EUR'
+    // }
+    ])
+    await hollaex.websocketSubscribe ('trade', 'XRP/EUR');
+    await hollaex.websocketSubscribe ('trade', 'XRP/EUR');
+    // hollaex.on('trade', (market, trade) => {
+    //     console.log(market, trade);
+    // })
 
     // setTimeout(() => {
     //     hollaex.websocketUnsubscribe('trade', 'BTC/EUR');
