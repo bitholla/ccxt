@@ -798,13 +798,17 @@ module.exports = class hollaex extends Exchange {
         // this._contextSet (contextId, 'symbol', symbol);
     }
 
-    convertSymbol (symbol) {
+    convertToDefaultSymbol (symbol) {
         return symbol.replace('-', '/').toUpperCase();
     }
 
-    _websocketOnMessage (contextId, data) {
-        let symbolData = undefined;
+    convertToExchangeSymbol (symbol) {
+        return symbol.replace('/', '-').toLowerCase();
+    }
+
+    _websocketOnMessage (contextId, data, type) {
         let obEventActive = false;
+        let tradeEventActive = false;
         let dataSymbol = undefined;
         let events = this.safeString (data, 'action');
         // let symbol = this._contextGet (contextId, 'symbol');
@@ -816,59 +820,81 @@ module.exports = class hollaex extends Exchange {
         } else {
             dataSymbol = data['symbol'];
         }
-        let convertedSymbol = this.convertSymbol (dataSymbol);
+        let convertedSymbol = this.convertToDefaultSymbol (dataSymbol);
         let subscribedEvents = this._contextGetEvents (contextId);
-        if ('ob' in subscribedEvents) {
-            if (convertedSymbol in subscribedEvents['ob']) {
+        if (type in subscribedEvents && convertedSymbol in subscribedEvents[type]) {
+            if (type === 'ob') {
                 obEventActive = true;
-                if (events === 'partial') {
-                    symbolData = {
-                        'bids': data[dataSymbol]['bids'],
-                        'asks': data[dataSymbol]['asks'],
-                        'datetime': data[dataSymbol]['timestamp'],
-                        'timestamp': this.parse8601 (data[dataSymbol]['timestamp']),
-                        'nonce': this.milliseconds() + Math.floor(Math.random() * Math.floor(100))
-                    };
-                    // this._contextSetSymbolData (contextId, 'ob', convertedSymbol, symbolData);
-                } else if (events === 'update') {
-                    symbolData = this._contextGetSymbolData (contextId, 'ob', convertedSymbol);
-                    let timestamp = this.safeString (data, 'timestamp');
-                    symbolData['bids'] = data[dataSymbol]['bids'];
-                    symbolData['asks'] = data[dataSymbol]['asks'];
-                    symbolData['timestamp'] = this.parse8601 (timestamp);
-                    symbolData['datetime'] = timestamp;
-                    symbolData['nonce'] = this.milliseconds() + Math.floor(Math.random() * Math.floor(100));
-                    // this._contextSetSymbolData (contextId, 'ob', convertedSymbol, symbolData);
-                }
+                this._websocketHandleOrderbook(contextId, data, convertedSymbol, events, obEventActive);
+            } else if (type === 'trade') {
+                tradeEventActive = true;
+                this._websocketHandleTrade(contextId, data, convertedSymbol, events, tradeEventActive);
             }
-        };
-        // if (events === 'update' && obEventActive) {
-        //     let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
-        //     symbolData[
-        //     this.updateBidAsk ([price, size], symbolData['ob'][keySide], side === 'bid');
-        // } else if (eventType === 'trade' && ('trade' in subscribedEvents)) {
-        //     this._websocketHandleTrade (msg, event, symbol);
-        // }
-        if (obEventActive) {
-            this.emit ('ob', convertedSymbol, symbolData); // True even with 'trade', as a trade event has the corresponding ob change event in the same events list
-            this._contextSetSymbolData (contextId, 'ob', convertedSymbol, symbolData);
         }
+        // console.log(subscribedEvents);
+        // if ('ob' in subscribedEvents) {
+        //     if (convertedSymbol in subscribedEvents['ob']) {
+        //         obEventActive = true;
+        //         if (events === 'partial') {
+        //             symbolData = {
+        //                 'bids': data[dataSymbol]['bids'],
+        //                 'asks': data[dataSymbol]['asks'],
+        //                 'datetime': data[dataSymbol]['timestamp'],
+        //                 'timestamp': this.parse8601 (data[dataSymbol]['timestamp']),
+        //                 'nonce': this.milliseconds() + Math.floor(Math.random() * Math.floor(100))
+        //             };
+        //             // this._contextSetSymbolData (contextId, 'ob', convertedSymbol, symbolData);
+        //         } else if (events === 'update') {
+        //             symbolData = this._contextGetSymbolData (contextId, 'ob', convertedSymbol);
+        //             let timestamp = this.safeString (data, 'timestamp');
+        //             symbolData['bids'] = data[dataSymbol]['bids'];
+        //             symbolData['asks'] = data[dataSymbol]['asks'];
+        //             symbolData['timestamp'] = this.parse8601 (timestamp);
+        //             symbolData['datetime'] = timestamp;
+        //             symbolData['nonce'] = this.milliseconds() + Math.floor(Math.random() * Math.floor(100));
+        //             // this._contextSetSymbolData (contextId, 'ob', convertedSymbol, symbolData);
+        //         }
+        //     }
+        // };
+        // // if (events === 'update' && obEventActive) {
+        // //     let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
+        // //     symbolData[
+        // //     this.updateBidAsk ([price, size], symbolData['ob'][keySide], side === 'bid');
+        // // } else if (eventType === 'trade' && ('trade' in subscribedEvents)) {
+        // //     this._websocketHandleTrade (msg, event, symbol);
+        // // }
+        // if (obEventActive && type === 'ob') {
+        //     this.emit ('ob', convertedSymbol, symbolData); // True even with 'trade', as a trade event has the corresponding ob change event in the same events list
+        //     this._contextSetSymbolData (contextId, 'ob', convertedSymbol, symbolData);
+        // } else if (tradeActive && type === 'trade') {
+        //     this._websocketHandleTrade (contextId, data);
+        // }
     }
 
-    _websocketHandleOrderbook (contextId, msg) {
-        let chan = this.safeString (msg, 'channel');
-        let parts = chan.split ('_');
-        let id = parts[1];
-        let symbol = this.findSymbol (id);
-        let data = this.safeValue (msg, 'data');
-        let datetime = this.safeString (data, 'timestamp');
-        let ob = data;
-        ob['datetime'] = datetime;
-        ob['timestamp'] = this.parse8601 (datetime);
-        let symbolData = this._contextGetSymbolData (contextId, 'ob', symbol);
-        symbolData['ob'] = ob;
-        this.emit ('ob', symbol, ob);
-        this._contextSetSymbolData (contextId, 'ob', symbol, symbolData);
+    _websocketHandleOrderbook (contextId, data, symbol, event, eventActive) {
+        let result = {};
+        let dataSymbol = this.convertToExchangeSymbol (symbol);
+        if (event === 'partial') {
+            result = {
+                'bids': data[dataSymbol]['bids'],
+                'asks': data[dataSymbol]['asks'],
+                'datetime': data[dataSymbol]['timestamp'],
+                'timestamp': this.parse8601 (data[dataSymbol]['timestamp']),
+                'nonce': this.milliseconds() + Math.floor(Math.random() * Math.floor(200))
+            };
+        } else if (event === 'update') {
+            result = this._contextGetSymbolData (contextId, 'ob', symbol);
+            let timestamp = this.safeString (data, 'timestamp');
+            result['bids'] = data[dataSymbol]['bids'];
+            result['asks'] = data[dataSymbol]['asks'];
+            result['timestamp'] = this.parse8601 (timestamp);
+            result['datetime'] = timestamp;
+            result['nonce'] = this.milliseconds() + Math.floor(Math.random() * Math.floor(200));
+        }
+        if (eventActive) {
+            this.emit ('ob', symbol, result);
+            this._contextSetSymbolData (contextId, 'ob', symbol, result);
+        }
     }
 
     _websocketHandleTrade (contextId, msg) {
