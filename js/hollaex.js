@@ -815,7 +815,6 @@ module.exports = class hollaex extends Exchange {
     }
 
     websocketParseOrderBook (response) {
-        console.log(this.socket);
         let datetime = this.safeString (response, 'timestamp');
         let timestamp = this.parse8601 (datetime);
         let result = {
