@@ -2246,11 +2246,11 @@ module.exports = class Exchange extends EventEmitter {
             // this._websocketResetContext (conxid);
             this.emit ('err', new NetworkError (err), conxid);
         });
-        websocketConnectionInfo['conx'].on ('message', (data) => {
+        websocketConnectionInfo['conx'].on ('message', (data, type = undefined) => {
             if (this.verbose)
                 console.log (conxid + '<-' + data);
             try {
-                this._websocketOnMessage (conxid, data);
+                this._websocketOnMessage (conxid, data, type);
             } catch (ex) {
                 this.emit ('err', ex, conxid);
             }
@@ -2515,7 +2515,7 @@ module.exports = class Exchange extends EventEmitter {
     _websocketOnOpen (contextId, websocketConexConfig) {
     }
 
-    _websocketOnMessage (contextId, data) {
+    _websocketOnMessage (contextId, data, type) {
     }
 
     _websocketOnClose (contextId) {
