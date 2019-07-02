@@ -11,19 +11,18 @@ async function main () {
         'event': 'ob',
         'symbol': 'XRP/EUR'
     },
-    // {
-    //     'event': 'trade',
-    //     'symbol': 'XRP/EUR'
-    // }
+    {
+        'event': 'trade',
+        'symbol': 'ETH/EUR'
+    }
     ])
     await hollaex.websocketSubscribe ('trade', 'XRP/EUR');
-    await hollaex.websocketSubscribe ('trade', 'XRP/EUR');
     hollaex.on('trade', (market, trade) => {
-        console.log(market, trade);
+        console.log(market);
     })
 
-    // setTimeout(() => {
-    //     hollaex.websocketUnsubscribe('trade', 'BTC/EUR');
-    // }, 20000)
+    setTimeout(() => {
+        hollaex.websocketUnsubscribe('trade', 'XRP/EUR');
+    }, 5000)
 };
 main();
