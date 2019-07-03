@@ -1,4 +1,4 @@
-const hollaWeb = require('./js/hollaex');
+const hollaWeb = require('./js/hollaex2');
 const hollaex = new hollaWeb();
 async function main () {
     await hollaex.loadMarkets();
@@ -18,11 +18,15 @@ async function main () {
     ])
     await hollaex.websocketSubscribe ('trade', 'XRP/EUR');
     hollaex.on('trade', (market, trade) => {
-        console.log(market);
+        console.log(market, 'trade');
     })
 
-    setTimeout(() => {
-        hollaex.websocketUnsubscribe('trade', 'XRP/EUR');
-    }, 5000)
+    hollaex.on('ob', (market, ob) => {
+        console.log(market, 'ob');
+    })
+
+    // setTimeout(() => {
+    //     hollaex.websocketUnsubscribe('trade', 'XRP/EUR');
+    // }, 5000)
 };
 main();

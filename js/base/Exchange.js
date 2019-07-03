@@ -349,6 +349,16 @@ module.exports = class Exchange extends EventEmitter {
             'trade': [],
         };
 
+        // this.sockets = [
+        //     {
+        //         'client': undefined,
+        //         'ob': [],
+        //         'trade': [],
+        //     }
+        // ]
+
+        this.sockets = [];
+
         this.arrayConcat = (a, b) => a.concat (b)
 
         const unCamelCaseProperties = (obj = this) => {
