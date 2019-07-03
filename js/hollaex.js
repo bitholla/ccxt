@@ -927,9 +927,19 @@ module.exports = class hollaex extends Exchange {
                 }
                 let symbol = eventSymbol['symbol'];
                 let params = eventSymbol['params'];
-                this.subscriptions[eventSymbol['event']] = this.subscriptions[eventSymbol['event']].filter((sub) => {
+                this.subscriptions[eventSymbol['event']] = await this.subscriptions[eventSymbol['event']].filter((sub) => {
                     return sub !== symbol;
                 })
+                for (let socket of this.sockets) {
+                    if (socket[eventSymbol['event']].indexOf(symbol) >= 0) {
+                        socket[eventSymbol['event']] = await socket[eventSymbol['event']].filter((sub) => {
+                            return sub !== symbol;
+                        })
+                        if (socket['ob'].length === 0 && socket['trade'].length === 0) {
+                            socket['client'].disconnect();
+                        }
+                    }
+                }
             }
             resolve();
         });

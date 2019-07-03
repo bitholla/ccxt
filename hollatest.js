@@ -25,8 +25,8 @@ async function main () {
         console.log(market, 'ob');
     })
 
-    // setTimeout(() => {
-    //     hollaex.websocketUnsubscribe('trade', 'XRP/EUR');
-    // }, 5000)
+    setTimeout(() => {
+        hollaex.websocketUnsubscribe('trade', 'XRP/EUR');
+    }, 5000)
 };
 main();
