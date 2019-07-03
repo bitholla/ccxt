@@ -788,6 +788,11 @@ module.exports = class hollaex extends Exchange {
     websocketSubscribeAll (eventSymbols) {
         let promise = new Promise (async (resolve, reject) => {
             await this.loadMarkets ();
+            let socket = {
+                'client': undefined,
+                'ob': [],
+                'trade': [],
+            };
             for (let eventSymbol of eventSymbols) {
                 this.market (eventSymbol.symbol);
                 if (eventSymbol['event'] !== 'ob' && eventSymbol['event'] !== 'trade') {
@@ -799,44 +804,42 @@ module.exports = class hollaex extends Exchange {
                     return;
                 } else {
                     await this.subscriptions[eventSymbol.event].push(eventSymbol.symbol);
+                    await socket[eventSymbol.event].push(eventSymbol.symbol);
                 }
             }
-            if (this.socket) {
+            socket.client = await io('https://api.hollaex.com/realtime');
+            socket.client.on('connect', async () => {
+                this.emit('open');
                 resolve();
-            } else {
-                this.socket = await io('https://api.hollaex.com/realtime');
-                this.socket.on('connect', async () => {
-                    this.emit('open');
-                    resolve();
-                })
-                this.socket.on('connect-error', (error) => {
-                    this.emit('err', error);
-                    reject(error);
-                })
-                this.socket.on('error', (error) => {
-                    this.emit('err', error);
-                    reject(error);
-                })
-                this.socket.on('disconnect', () => {
-                    this.emit('close');
-                    reject('closing');
-                });
-                this.socket.on('orderbook', (data) => {
-                    let exchangeSymbol = data['symbol'];
-                    if (this.subscriptions['ob'].includes(this.convertSymbol(exchangeSymbol))) {
-                        let ob = this.websocketParseOrderBook(data[exchangeSymbol]);
-                        this.emit('ob', this.convertSymbol(exchangeSymbol), ob);
-                    }
-                })
-                this.socket.on('trades', (data) => {
-                    let exchangeSymbol = data['symbol'];
-                    if (this.subscriptions['trade'].includes(this.convertSymbol(exchangeSymbol))) {
-                        let trade = this.websocketParseTrade(data[exchangeSymbol], this.convertSymbol(exchangeSymbol));
-                        this.emit('trade', this.convertSymbol(exchangeSymbol), trade);
-                    }
-                })
-                resolve();
-            }
+            })
+            socket.client.on('connect-error', (error) => {
+                this.emit('err', error);
+                reject(error);
+            })
+            socket.client.on('error', (error) => {
+                this.emit('err', error);
+                reject(error);
+            })
+            socket.client.on('disconnect', () => {
+                this.emit('close');
+                reject('closing');
+            });
+            socket.client.on('orderbook', (data) => {
+                let exchangeSymbol = data['symbol'];
+                if (socket['ob'].includes(this.convertSymbol(exchangeSymbol))) {
+                    let ob = this.websocketParseOrderBook(data[exchangeSymbol]);
+                    this.emit('ob', this.convertSymbol(exchangeSymbol), ob);
+                }
+            })
+            socket.client.on('trades', (data) => {
+                let exchangeSymbol = data['symbol'];
+                if (socket['trade'].includes(this.convertSymbol(exchangeSymbol))) {
+                    let trade = this.websocketParseTrade(data[exchangeSymbol], this.convertSymbol(exchangeSymbol));
+                    this.emit('trade', this.convertSymbol(exchangeSymbol), trade);
+                }
+            })
+            await this.sockets.push(socket);
+            resolve();
         })
         return promise;
     }

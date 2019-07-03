@@ -343,20 +343,10 @@ module.exports = class Exchange extends EventEmitter {
         this.last_json_response    = undefined
         this.last_response_headers = undefined
 
-        this.socket = undefined;
         this.subscriptions = {
             'ob': [],
             'trade': [],
         };
-
-        // this.sockets = [
-        //     {
-        //         'client': undefined,
-        //         'ob': [],
-        //         'trade': [],
-        //     }
-        // ]
-
         this.sockets = [];
 
         this.arrayConcat = (a, b) => a.concat (b)

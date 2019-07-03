@@ -1,4 +1,4 @@
-const hollaWeb = require('./js/hollaex2');
+const hollaWeb = require('./js/hollaex');
 const hollaex = new hollaWeb();
 async function main () {
     await hollaex.loadMarkets();
