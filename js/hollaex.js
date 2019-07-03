@@ -788,11 +788,6 @@ module.exports = class hollaex extends Exchange {
     websocketSubscribeAll (eventSymbols) {
         let promise = new Promise (async (resolve, reject) => {
             await this.loadMarkets ();
-            let socket = {
-                'client': undefined,
-                'ob': [],
-                'trade': [],
-            };
             for (let eventSymbol of eventSymbols) {
                 this.market (eventSymbol.symbol);
                 if (eventSymbol['event'] !== 'ob' && eventSymbol['event'] !== 'trade') {
@@ -804,41 +799,43 @@ module.exports = class hollaex extends Exchange {
                     return;
                 } else {
                     await this.subscriptions[eventSymbol.event].push(eventSymbol.symbol);
-                    await socket[eventSymbol.event].push(eventSymbol.symbol);
                 }
             }
-            socket.client = await io('https://api.hollaex.com/realtime');
-            socket.client.on('connect', async () => {
+            if (this.socket !== undefined) {
+                this.socket.close();
+                this.socket = undefined;
+            }
+            this.socket = await io('https://api.hollaex.com/realtime');
+            this.socket.on('connect', async () => {
                 this.emit('open');
                 resolve();
             })
-            socket.client.on('connect-error', (error) => {
+            this.socket.on('connect-error', (error) => {
                 this.emit('err', error);
                 reject(error);
             })
-            socket.client.on('error', (error) => {
+            this.socket.on('error', (error) => {
                 this.emit('err', error);
                 reject(error);
             })
-            socket.client.on('disconnect', () => {
+            this.socket.on('disconnect', () => {
                 this.emit('close');
                 reject('closing');
             });
-            socket.client.on('orderbook', (data) => {
+            this.socket.on('orderbook', (data) => {
                 let exchangeSymbol = data['symbol'];
-                if (socket['ob'].includes(this.convertSymbol(exchangeSymbol))) {
+                if (this.subscriptions['ob'].includes(this.convertSymbol(exchangeSymbol))) {
                     let ob = this.websocketParseOrderBook(data[exchangeSymbol]);
                     this.emit('ob', this.convertSymbol(exchangeSymbol), ob);
                 }
             })
-            socket.client.on('trades', (data) => {
+            this.socket.on('trades', (data) => {
                 let exchangeSymbol = data['symbol'];
-                if (socket['trade'].includes(this.convertSymbol(exchangeSymbol))) {
+                if (this.subscriptions['trade'].includes(this.convertSymbol(exchangeSymbol))) {
                     let trade = this.websocketParseTrade(data[exchangeSymbol], this.convertSymbol(exchangeSymbol));
                     this.emit('trade', this.convertSymbol(exchangeSymbol), trade);
                 }
             })
-            await this.sockets.push(socket);
             resolve();
         })
         return promise;
@@ -930,16 +927,6 @@ module.exports = class hollaex extends Exchange {
                 this.subscriptions[eventSymbol['event']] = await this.subscriptions[eventSymbol['event']].filter((sub) => {
                     return sub !== symbol;
                 })
-                for (let socket of this.sockets) {
-                    if (socket[eventSymbol['event']].indexOf(symbol) >= 0) {
-                        socket[eventSymbol['event']] = await socket[eventSymbol['event']].filter((sub) => {
-                            return sub !== symbol;
-                        })
-                        if (socket['ob'].length === 0 && socket['trade'].length === 0) {
-                            socket['client'].disconnect();
-                        }
-                    }
-                }
             }
             resolve();
         });
@@ -947,11 +934,7 @@ module.exports = class hollaex extends Exchange {
     }
 
     websocketClose () {
-        this.sockets.forEach((socket) => {
-            socket['client'].close();
-            socket['ob'] = [];
-            socket['trade'] = [];
-        })
+        this.socket.close();
         this.subscriptions['ob'] = [];
         this.subscriptions['trade'] = [];
     }

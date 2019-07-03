@@ -16,17 +16,16 @@ async function main () {
         'symbol': 'ETH/EUR'
     }
     ])
-    await hollaex.websocketSubscribe ('trade', 'XRP/EUR');
     hollaex.on('trade', (market, trade) => {
-        console.log(market, 'trade');
+        console.log(market);
     })
 
     hollaex.on('ob', (market, ob) => {
-        console.log(market, 'ob');
+        console.log(market);
     })
 
     setTimeout(() => {
-        hollaex.websocketUnsubscribe('trade', 'XRP/EUR');
+        hollaex.websocketSubscribe ('trade', 'XRP/EUR');
     }, 5000)
 };
 main();
