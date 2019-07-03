@@ -947,6 +947,12 @@ module.exports = class hollaex extends Exchange {
     }
 
     websocketClose () {
-        this.socket.close();
+        this.sockets.forEach((socket) => {
+            socket['client'].close();
+            socket['ob'] = [];
+            socket['trade'] = [];
+        })
+        this.subscriptions['ob'] = [];
+        this.subscriptions['trade'] = [];
     }
 };
