@@ -795,7 +795,7 @@ module.exports = class hollaex extends Exchange {
                     return;
                 }
                 if (this.subscriptions[eventSymbol.event].indexOf(eventSymbol.symbol) >= 0) {
-                    reject (new BadRequest (`${eventSymbol['event']} - ${eventSymbol['symbol']} already subscribed to for exchange ${this.id}`));
+                    // reject (new BadRequest (`${eventSymbol['event']} - ${eventSymbol['symbol']} already subscribed to for exchange ${this.id}`));
                     return;
                 } else {
                     await this.subscriptions[eventSymbol.event].push(eventSymbol.symbol);
