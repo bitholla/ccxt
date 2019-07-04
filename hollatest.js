@@ -1,15 +1,15 @@
-const hollaWeb = require('./js/hollaex');
+const hollaWeb = require('./js/binance');
 const hollaex = new hollaWeb();
 async function main () {
     await hollaex.loadMarkets();
     // await hollaex.websocketSubscribe('ob', 'BTC/EUR');
     await hollaex.websocketSubscribeAll([{
         'event': 'ob',
-        'symbol': 'ETH/EUR'
+        'symbol': 'ETH/USDT'
     },
     {
         'event': 'ob',
-        'symbol': 'XRP/EUR'
+        'symbol': 'XRP/USDT'
     },
     // {
     //     'event': 'trade',

@@ -791,14 +791,13 @@ module.exports = class hollaex extends Exchange {
             for (let eventSymbol of eventSymbols) {
                 let event = eventSymbol['event'];
                 let symbol = eventSymbol['symbol'];
-                this.market (event);
+                this.market (symbol);
                 if (event !== 'ob' && event !== 'trade') {
                     reject (new NotSupported (`Not valid event ${event} for exchange ${this.id}`));
                     return;
                 }
                 if (this.subscriptions[event].indexOf(symbol) >= 0) {
-                    reject (new BadRequest (`${event} - ${symbol} already subscribed to for exchange ${this.id}`));
-                    return;
+                    throw new BadRequest (`${event} - ${symbol} already subscribed to for exchange ${this.id}`);
                 } else {
                     await this.subscriptions[event].push(symbol);
                 }
@@ -914,19 +913,17 @@ module.exports = class hollaex extends Exchange {
             await this.loadMarkets ();
             for (let eventSymbol of eventSymbols){
                 let event = eventSymbol['event'];
-                let symbol = eventSYmbol['symbol'];
+                let symbol = eventSymbol['symbol'];
                 this.market (symbol);
                 if (event !== 'ob' && event !== 'trade') {
                     reject(new NotSupported (`Not valid event ${event} for exchange ${this.id}`));
                     return;
                 }
                 if (this.subscriptions[event].indexOf(symbol) === -1) {
-                    reject(new BadRequest (`${event} - ${symbol} not subscribed to for exchange ${this.id}`));
-                    return;
+                    throw new BadRequest (`${event} - ${symbol} not subscribed to for exchange ${this.id}`);
                 }
                 if (this.subscriptions[event].length === 0) {
-                    reject(new BadRequest (`${event} has no subscriptions for exchange ${this.id}`));
-                    return;
+                    throw new BadRequest (`${event} has no subscriptions for exchange ${this.id}`);
                 }
                 this.subscriptions[event] = await this.subscriptions[event].filter((sub) => {
                     return sub !== symbol;
