@@ -789,16 +789,18 @@ module.exports = class hollaex extends Exchange {
         let promise = new Promise (async (resolve, reject) => {
             await this.loadMarkets ();
             for (let eventSymbol of eventSymbols) {
-                this.market (eventSymbol.symbol);
-                if (eventSymbol['event'] !== 'ob' && eventSymbol['event'] !== 'trade') {
-                    reject (new NotSupported (`Not valid event ${eventSymbol['event']} for exchange ${this.id}`));
+                let event = eventSymbol['event'];
+                let symbol = eventSymbol['symbol'];
+                this.market (event);
+                if (event !== 'ob' && event !== 'trade') {
+                    reject (new NotSupported (`Not valid event ${event} for exchange ${this.id}`));
                     return;
                 }
-                if (this.subscriptions[eventSymbol.event].indexOf(eventSymbol.symbol) >= 0) {
-                    // reject (new BadRequest (`${eventSymbol['event']} - ${eventSymbol['symbol']} already subscribed to for exchange ${this.id}`));
+                if (this.subscriptions[event].indexOf(symbol) >= 0) {
+                    reject (new BadRequest (`${event} - ${symbol} already subscribed to for exchange ${this.id}`));
                     return;
                 } else {
-                    await this.subscriptions[eventSymbol.event].push(eventSymbol.symbol);
+                    await this.subscriptions[event].push(symbol);
                 }
             }
             if (this.socket !== undefined) {
@@ -824,16 +826,18 @@ module.exports = class hollaex extends Exchange {
             });
             this.socket.on('orderbook', (data) => {
                 let exchangeSymbol = data['symbol'];
-                if (this.subscriptions['ob'].includes(this.convertSymbol(exchangeSymbol))) {
+                let convertedSymbol = this.convertSymbol(exchangeSymbol);
+                if (this.subscriptions['ob'].includes(convertedSymbol)) {
                     let ob = this.websocketParseOrderBook(data[exchangeSymbol]);
-                    this.emit('ob', this.convertSymbol(exchangeSymbol), ob);
+                    this.emit('ob', convertedSymbol, ob);
                 }
             })
             this.socket.on('trades', (data) => {
                 let exchangeSymbol = data['symbol'];
-                if (this.subscriptions['trade'].includes(this.convertSymbol(exchangeSymbol))) {
-                    let trade = this.websocketParseTrade(data[exchangeSymbol], this.convertSymbol(exchangeSymbol));
-                    this.emit('trade', this.convertSymbol(exchangeSymbol), trade);
+                let convertedSymbol = this.convertSymbol(exchangeSymbol);
+                if (this.subscriptions['trade'].includes(convertedSymbol)) {
+                    let trade = this.websocketParseTrade(data[exchangeSymbol], convertedSymbol);
+                    this.emit('trade', convertedSymbol, trade);
                 }
             })
             resolve();
@@ -846,7 +850,7 @@ module.exports = class hollaex extends Exchange {
     }
 
     websocketParseOrderBook (response) {
-        let datetime = this.safeString (response, 'timestamp');
+        let datetime = response['timestamp'];
         let timestamp = this.parse8601 (datetime);
         let result = {
             'bids': response['bids'],
@@ -860,17 +864,17 @@ module.exports = class hollaex extends Exchange {
 
     websocketParseTrade (trades, symbol = undefined) {
         let response = [];
-        trades.forEach((trade) => {
+        for (let trade of trades) {
             let info = trade;
             let id = undefined;
-            let datetime = this.safeString (trade, 'timestamp');
+            let datetime = trade['timestamp'];
             let timestamp = this.parse8601 (datetime);
             let order = undefined;
             let type = undefined;
-            let side = this.safeString (trade, 'side');
+            let side = trade['side'];
             let takerOrMaker = undefined;
-            let price = this.safeFloat (trade, 'price');
-            let amount = this.safeFloat (trade, 'size');
+            let price = trade['price'];
+            let amount = trade['size'];
             let cost = parseFloat (this.amountToPrecision (symbol, price * amount));
             let fee = undefined;
             let result = {
@@ -889,7 +893,7 @@ module.exports = class hollaex extends Exchange {
                 'fee': fee,
             };
             response.push(result);
-        })
+        }
         if (response.length > 1) {
             return response;
         } else {
@@ -909,22 +913,22 @@ module.exports = class hollaex extends Exchange {
         let promise = new Promise (async (resolve, reject) => {
             await this.loadMarkets ();
             for (let eventSymbol of eventSymbols){
-                this.market (eventSymbol['symbol']);
-                if (eventSymbol['event'] !== 'ob' && eventSymbol['event'] !== 'trade') {
-                    reject(new NotSupported ('Not valid event ' + eventSymbol['event'] + ' for exchange ' + this.id));
+                let event = eventSymbol['event'];
+                let symbol = eventSYmbol['symbol'];
+                this.market (symbol);
+                if (event !== 'ob' && event !== 'trade') {
+                    reject(new NotSupported (`Not valid event ${event} for exchange ${this.id}`));
                     return;
                 }
-                if (this.subscriptions[eventSymbol['event']].indexOf(eventSymbol['symbol']) === -1) {
-                    reject(new BadRequest (eventSymbol['event'] + ' - ' + eventSymbol['symbol'] + ' not subscribed to for exchange ' + this.id));
+                if (this.subscriptions[event].indexOf(symbol) === -1) {
+                    reject(new BadRequest (`${event} - ${symbol} not subscribed to for exchange ${this.id}`));
                     return;
                 }
-                if (this.subscriptions[eventSymbol['event']].length === 0) {
-                    reject(new BadRequest (eventSymbol['event'] + ' has no subscriptions for exchange ' + this.id));
+                if (this.subscriptions[event].length === 0) {
+                    reject(new BadRequest (`${event} has no subscriptions for exchange ${this.id}`));
                     return;
                 }
-                let symbol = eventSymbol['symbol'];
-                let params = eventSymbol['params'];
-                this.subscriptions[eventSymbol['event']] = await this.subscriptions[eventSymbol['event']].filter((sub) => {
+                this.subscriptions[event] = await this.subscriptions[event].filter((sub) => {
                     return sub !== symbol;
                 })
             }
