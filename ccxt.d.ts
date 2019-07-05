@@ -149,7 +149,7 @@ declare module 'ccxt' {
     export interface Transaction {
         info: {};
         id: string;
-        txid: string;
+        txid?: string;
         timestamp: number;
         datetime: string;
         address: string;
@@ -198,6 +198,18 @@ declare module 'ccxt' {
         currency: string;
         rate: number;
         cost: number;
+    }
+
+    export interface WithdrawalResponse {
+        info: any;
+        id: string;
+    }
+
+    export interface DepositAddressResponse {
+        currency: string;
+        address: string;
+        info: any;
+        tag?: string;
     }
 
     // timestamp, open, high, low, close, volume
@@ -311,9 +323,9 @@ declare module 'ccxt' {
         fetchDeposits (currency?: string, since?: number, limit?: number, params?: {}): Promise<Transaction[]>;
         fetchWithdrawals (currency?: string, since?: number, limit?: number, params?: {}): Promise<Transaction[]>;
         cancelOrder (id: string, symbol?: string, params?: {}): Promise<any>;
-        createDepositAddress (currency: string, params?: {}): Promise<any>;
-        fetchDepositAddress (currency: string, params?: {}): Promise<any>;
-        withdraw (currency: string, amount: number, address: string, tag?: string, params?: {}): Promise<any>;
+        createDepositAddress (currency: string, params?: {}): Promise<DepositAddressResponse>;
+        fetchDepositAddress (currency: string, params?: {}): Promise<DepositAddressResponse>;
+        withdraw (currency: string, amount: number, address: string, tag?: string, params?: {}): Promise<WithdrawalResponse>;
         request (path: string, api?: string, method?: string, params?: any, headers?: any, body?: any): Promise<any>;
         YmdHMS (timestamp: string, infix: string) : string;
         iso8601 (timestamp: string): string;
@@ -391,9 +403,9 @@ declare module 'ccxt' {
     export class coss extends Exchange {}
     export class crex24 extends Exchange {}
     export class crypton extends Exchange {}
-    export class cryptopia extends Exchange {}
     export class deribit extends Exchange {}
     export class dsx extends liqui {}
+    export class dx extends Exchange {}
     export class ethfinex extends bitfinex {}
     export class exmo extends Exchange {}
     export class exx extends Exchange {}
@@ -410,6 +422,7 @@ declare module 'ccxt' {
     export class hadax extends huobipro {}
     export class hitbtc extends Exchange {}
     export class hitbtc2 extends hitbtc {}
+    export class hollaex extends Exchange {}
     export class huobipro extends Exchange {}
     export class huobiru extends huobipro {}
     export class ice3x extends Exchange {}
@@ -434,9 +447,11 @@ declare module 'ccxt' {
     export class mixcoins extends Exchange {}
     export class negociecoins extends Exchange {}
     export class nova extends Exchange {}
+    export class oceanex extends Exchange {}
     export class okcoincny extends okcoinusd {}
     export class okcoinusd extends Exchange {}
     export class okex extends okcoinusd {}
+    export class okex3 extends Exchange {}
     export class paymium extends Exchange {}
     export class poloniex extends Exchange {}
     export class quadrigacx extends Exchange {}

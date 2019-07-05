@@ -4,7 +4,6 @@
 /*  ------------------------------------------------------------------------ */
 
 const functions = require ('./functions')
-    , Market    = require ('./Market')
 
 const {
     isNode
@@ -43,7 +42,7 @@ const {
 
 const { TRUNCATE, ROUND, DECIMAL_PLACES } = functions.precisionConstants
 
-const defaultFetch = typeof (fetch) === "undefined" ? require ('fetch-ponyfill') ().fetch : fetch
+const defaultFetch = typeof (fetch) === "undefined" ? require ('../static_dependencies/fetch-ponyfill/fetch-node') ().fetch : fetch
 
 // ----------------------------------------------------------------------------
 // web3 / 0x imports
@@ -66,30 +65,15 @@ try {
 
 const journal = undefined // isNode && require ('./journal') // stub until we get a better solution for Webpack and React
 
-const EventEmitter = require('events')
+const EventEmitter = require ('events')
 const WebsocketConnection = require ('./websocket/websocket_connection')
 const PusherLightConnection = require ('./websocket/pusherlight_connection')
 const SocketIoLightConnection = require ('./websocket/socketiolight_connection')
-var zlib = require('zlib');
+let zlib = require ('zlib');
 
 /*  ------------------------------------------------------------------------ */
 
-module.exports = class Exchange extends EventEmitter{
-
-    getMarket (symbol) {
-
-        if (!this.marketClasses)
-            this.marketClasses = {}
-
-        let marketClass = this.marketClasses[symbol]
-
-        if (marketClass)
-            return marketClass
-
-        marketClass = new Market (this, symbol)
-        this.marketClasses[symbol] = marketClass // only one Market instance per market
-        return marketClass
-    }
+module.exports = class Exchange extends EventEmitter {
 
     describe () {
         return {
@@ -157,6 +141,7 @@ module.exports = class Exchange extends EventEmitter{
                 'twofa':      false, // 2-factor authentication (one-time password key)
                 'privateKey': false, // a "0x"-prefixed hexstring private key for a wallet
                 'walletAddress': false, // the wallet address "0x"-prefixed hexstring
+                'token':      false, // reserved for HTTP auth in some cases
             },
             'markets': undefined, // to be filled manually or by fetchMarkets
             'currencies': {}, // to be filled manually or by fetchMarkets
@@ -329,7 +314,6 @@ module.exports = class Exchange extends EventEmitter{
         this.timeout       = 10000 // milliseconds
         this.verbose       = false
         this.debug         = false
-        this.journal       = 'debug.json'
         this.userAgent     = undefined
         this.twofa         = undefined // two-factor authentication (2FA)
 
@@ -340,6 +324,7 @@ module.exports = class Exchange extends EventEmitter{
         this.password      = undefined
         this.privateKey    = undefined // a "0x"-prefixed hexstring private key for a wallet
         this.walletAddress = undefined // a wallet address "0x"-prefixed hexstring
+        this.token         = undefined // reserved for HTTP auth in some cases
 
         this.balance     = {}
         this.orderbooks  = {}
@@ -357,6 +342,12 @@ module.exports = class Exchange extends EventEmitter{
         this.last_http_response    = undefined
         this.last_json_response    = undefined
         this.last_response_headers = undefined
+
+        this.socket = undefined;
+        this.subscriptions = {
+            'ob': [],
+            'trade': [],
+        };
 
         this.arrayConcat = (a, b) => a.concat (b)
 
@@ -393,10 +384,6 @@ module.exports = class Exchange extends EventEmitter{
         if (this.markets)
             this.setMarkets (this.markets)
 
-        if (this.debug && journal) {
-            journal (() => this.journal, this, Object.keys (this.has))
-        }
-
         if (this.requiresWeb3 && !this.web3 && Web3) {
             const provider = (this.web3ProviderURL) ? new Web3.providers.HttpProvider (this.web3ProviderURL) : new Web3.providers.HttpProvider ()
             this.web3 = new Web3 (Web3.givenProvider || provider)
@@ -423,7 +410,7 @@ module.exports = class Exchange extends EventEmitter{
         Object.keys (this.requiredCredentials).forEach ((key) => {
             if (this.requiredCredentials[key] && !this[key]) {
                 if (error) {
-                    throw new AuthenticationError (this.id + ' requires `' + key + '`')
+                    throw new AuthenticationError (this.id + ' requires `' + key + '` credential')
                 } else {
                     return error
                 }
@@ -498,13 +485,22 @@ module.exports = class Exchange extends EventEmitter{
     setSandboxMode (enabled) {
         if (!!enabled) {
             if ('test' in this.urls) {
-                this.urls['api_backup'] = clone (this.urls['api'])
-                this.urls['api'] = clone (this.urls['test'])
+                if (typeof this.urls['api'] === 'string') {
+                    this.urls['api_backup'] = this.urls['api']
+                    this.urls['api'] = this.urls['test']
+                } else {
+                    this.urls['api_backup'] = clone (this.urls['api'])
+                    this.urls['api'] = clone (this.urls['test'])
+                }
             } else {
                 throw new NotSupported (this.id + ' does not have a sandbox URL')
             }
         } else if ('api_backup' in this.urls) {
-            this.urls['api'] = clone (this.urls['api_backup'])
+            if (typeof this.urls['api'] === 'string') {
+                this.urls['api'] = this.urls['api_backup']
+            } else {
+                this.urls['api'] = clone (this.urls['api_backup'])
+            }
         }
     }
 
@@ -1210,12 +1206,12 @@ module.exports = class Exchange extends EventEmitter{
         return indexed ? indexBy (result, key) : result
     }
 
-    parseTrades (trades, market = undefined, since = undefined, limit = undefined) {
+    parseTrades (trades, market = undefined, since = undefined, limit = undefined, params = {}) {
         // this code is commented out temporarily to catch for exchange-specific errors
         // if (!this.isArray (trades)) {
         //     throw new ExchangeError (this.id + ' parseTrades expected an array in the trades argument, but got ' + typeof trades);
         // }
-        let result = Object.values (trades || []).map (trade => this.parseTrade (trade, market))
+        let result = Object.values (trades || []).map (trade => this.extend (this.parseTrade (trade, market), params))
         result = sortBy (result, 'timestamp')
         let symbol = (market !== undefined) ? market['symbol'] : undefined
         return this.filterBySymbolSinceLimit (result, symbol, since, limit)
@@ -1232,23 +1228,23 @@ module.exports = class Exchange extends EventEmitter{
         return this.filterByCurrencySinceLimit (result, code, since, limit);
     }
 
-    parseLedger (data, currency = undefined, since = undefined, limit = undefined) {
+    parseLedger (data, currency = undefined, since = undefined, limit = undefined, params = {}) {
         let result = [];
         let array = Object.values (data || []);
         for (let i = 0; i < array.length; i++) {
-            result.push (this.parseLedgerEntry (array[i], currency));
+            result.push (this.extend (this.parseLedgerEntry (array[i], currency), params));
         }
         result = this.sortBy (result, 'timestamp');
         let code = (currency !== undefined) ? currency['code'] : undefined;
         return this.filterByCurrencySinceLimit (result, code, since, limit);
     }
 
-    parseOrders (orders, market = undefined, since = undefined, limit = undefined) {
+    parseOrders (orders, market = undefined, since = undefined, limit = undefined, params = {}) {
         // this code is commented out temporarily to catch for exchange-specific errors
         // if (!this.isArray (orders)) {
         //     throw new ExchangeError (this.id + ' parseOrders expected an array in the orders argument, but got ' + typeof orders);
         // }
-        let result = Object.values (orders).map (order => this.parseOrder (order, market))
+        let result = Object.values (orders).map (order => this.extend (this.parseOrder (order, market), params))
         result = sortBy (result, 'timestamp')
         let symbol = (market !== undefined) ? market['symbol'] : undefined
         return this.filterBySymbolSinceLimit (result, symbol, since, limit)
@@ -1409,14 +1405,13 @@ module.exports = class Exchange extends EventEmitter{
 
     // ------------------------------------------------------------------------
     // web3 / 0x methods
-
     static hasWeb3 () {
         return Web3 && ethUtil && ethAbi && BigNumber
     }
 
     checkRequiredDependencies () {
         if (!Exchange.hasWeb3 ()) {
-            throw new ExchangeError ('The following npm modules are required:\nnpm install web3 ethereumjs-util ethereumjs-abi bignumber.js --no-save');
+            throw new ExchangeError ("The following npm modules are required:\nnpm install web3 ethereumjs-util ethereumjs-abi bignumber.js --no-save");
         }
     }
 
@@ -1622,7 +1617,7 @@ module.exports = class Exchange extends EventEmitter{
         const signature = this.signMessage (orderHash, privateKey);
         return this.extend (order, {
             'orderHash': orderHash,
-            'signature': this.convertECSignatureToSignatureHex(signature),
+            'signature': this.convertECSignatureToSignatureHex (signature),
         })
     }
 
@@ -1927,7 +1922,7 @@ module.exports = class Exchange extends EventEmitter{
         };
     }
 
-    _websocketGetActionForEvent(conxid, event, symbol, subscription=true, subscriptionParams = {}){
+    _websocketGetActionForEvent(conxid, event, symbol, subscription=true, subscriptionParams = {}) {
         // if subscription and still subscribed no action returned
         //let sym = undefined;
         //if ((event in this.websocketContext[conxid]) && (symbol in this.websocketContext[conxid][event])){
@@ -1969,7 +1964,7 @@ module.exports = class Exchange extends EventEmitter{
         if (!(('id' in config) && ('url' in config) && ('type' in config))) {
             throw new ExchangeError ("invalid websocket configuration in exchange: " + this.id);
         }
-        switch (config['type']){
+        switch (config['type']) {
             case 'signalr':
                 return {
                     'action': 'connect',
@@ -1999,7 +1994,7 @@ module.exports = class Exchange extends EventEmitter{
                     'conx-tpl': conxTplName,
                 };
             case 'ws-s':
-                let subscribed = this._websocketContextGetSubscribedEventSymbols(config['id']);
+                let subscribed = this._websocketContextGetSubscribedEventSymbols (config['id']);
                 if (subscription) {
                     subscribed.push ({
                         'event': event,
@@ -2047,7 +2042,7 @@ module.exports = class Exchange extends EventEmitter{
     async _websocketEnsureConxActive (event, symbol, subscribe, subscriptionParams = {}, delayed = false) {
         let { conxid, conxtpl } = this._websocketGetConxid4Event (event, symbol);
         if (!(conxid in this.websocketContexts)) {
-            this._websocketResetContext(conxid, conxtpl);
+            this._websocketResetContext (conxid, conxtpl);
         }
         let action = this._websocketGetActionForEvent (conxid, event, symbol, subscribe, subscriptionParams);
         if (action !== null) {

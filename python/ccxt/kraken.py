@@ -222,6 +222,7 @@ class kraken (Exchange):
             },
             'commonCurrencies': {
                 'XDG': 'DOGE',
+                'FEE': 'KFEE',
             },
             'options': {
                 'cacheDepositMethodsOnFetchDepositAddress': True,  # will issue up to two calls in fetchDepositAddress
@@ -486,17 +487,17 @@ class kraken (Exchange):
 
     def fetch_tickers(self, symbols=None, params={}):
         self.load_markets()
-        pairs = []
-        for s in range(0, len(self.symbols)):
-            symbol = self.symbols[s]
+        symbols = self.symbols if (symbols is None) else symbols
+        marketIds = []
+        for i in range(0, len(self.symbols)):
+            symbol = self.symbols[i]
             market = self.markets[symbol]
-            if market['active']:
-                if not market['darkpool']:
-                    pairs.append(market['id'])
-        filter = ','.join(pairs)
-        response = self.publicGetTicker(self.extend({
-            'pair': filter,
-        }, params))
+            if market['active'] and not market['darkpool']:
+                marketIds.append(market['id'])
+        request = {
+            'pair': ','.join(marketIds),
+        }
+        response = self.publicGetTicker(self.extend(request, params))
         tickers = response['result']
         ids = list(tickers.keys())
         result = {}
@@ -505,7 +506,8 @@ class kraken (Exchange):
             market = self.markets_by_id[id]
             symbol = market['symbol']
             ticker = tickers[id]
-            result[symbol] = self.parse_ticker(ticker, market)
+            if self.in_array(symbol, symbols):
+                result[symbol] = self.parse_ticker(ticker, market)
         return result
 
     def fetch_ticker(self, symbol, params={}):
@@ -577,16 +579,15 @@ class kraken (Exchange):
             direction = 'in'
         time = self.safe_float(item, 'time')
         timestamp = None
-        datetime = None
         if time is not None:
             timestamp = int(time * 1000)
-            datetime = self.iso8601(timestamp)
         fee = {
             'cost': self.safe_float(item, 'fee'),
             'currency': code,
         }
         before = None
         after = self.safe_float(item, 'balance')
+        status = 'ok'
         return {
             'info': item,
             'id': id,
@@ -599,8 +600,9 @@ class kraken (Exchange):
             'amount': amount,
             'before': before,
             'after': after,
+            'status': status,
             'timestamp': timestamp,
-            'datetime': datetime,
+            'datetime': self.iso8601(timestamp),
             'fee': fee,
         }
 
@@ -940,14 +942,17 @@ class kraken (Exchange):
             # 'trades': self.parse_trades(order['trades'], market),
         }
 
-    def parse_orders(self, orders, market=None, since=None, limit=None):
+    def parse_orders(self, orders, market=None, since=None, limit=None, params={}):
         result = []
         ids = list(orders.keys())
+        symbol = None
+        if market is not None:
+            symbol = market['symbol']
         for i in range(0, len(ids)):
             id = ids[i]
             order = self.extend({'id': id}, orders[id])
-            result.append(self.parse_order(order, market))
-        return self.filter_by_since_limit(result, since, limit)
+            result.append(self.extend(self.parse_order(order, market), params))
+        return self.filter_by_symbol_since_limit(result, symbol, since, limit)
 
     def fetch_order(self, id, symbol=None, params={}):
         self.load_markets()

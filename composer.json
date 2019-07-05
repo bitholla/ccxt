@@ -231,6 +231,8 @@
         "ext-curl": "*",
         "ext-iconv": "*",
         "ext-pcre": "*",
+        "ext-json": "*",
+        "ext-openssl": "*",
         "ratchet/pawl": "^0.3.1",
         "clue/block-react": "^1.2",
         "kornrunner/secp256k1": "0.1.0",

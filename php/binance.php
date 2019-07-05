@@ -63,7 +63,10 @@ class binance extends Exchange {
                 ),
                 'www' => 'https://www.binance.com',
                 'referral' => 'https://www.binance.com/?ref=10205187',
-                'doc' => 'https://github.com/binance-exchange/binance-official-api-docs/blob/master/rest-api.md',
+                'doc' => array (
+                    'https://github.com/binance-exchange/binance-official-api-docs/blob/master/rest-api.md',
+                    'https://github.com/binance-exchange/binance-official-api-docs/blob/master/wapi-api.md',
+                ),
                 'fees' => 'https://www.binance.com/en/fee/schedule',
             ),
             'api' => array (
@@ -106,6 +109,7 @@ class binance extends Exchange {
                         'depth',
                         'trades',
                         'aggTrades',
+                        'historicalTrades',
                         'klines',
                         'ticker/24hr',
                         'ticker/allPrices',
@@ -141,123 +145,6 @@ class binance extends Exchange {
                     'percentage' => true,
                     'taker' => 0.001,
                     'maker' => 0.001,
-                ),
-                // should be deleted, these are outdated and inaccurate
-                'funding' => array (
-                    'tierBased' => false,
-                    'percentage' => false,
-                    'withdraw' => array (
-                        'ADA' => 1.0,
-                        'ADX' => 4.7,
-                        'AION' => 1.9,
-                        'AMB' => 11.4,
-                        'APPC' => 6.5,
-                        'ARK' => 0.1,
-                        'ARN' => 3.1,
-                        'AST' => 10.0,
-                        'BAT' => 18.0,
-                        'BCD' => 1.0,
-                        'BCH' => 0.001,
-                        'BCPT' => 10.2,
-                        'BCX' => 1.0,
-                        'BNB' => 0.7,
-                        'BNT' => 1.5,
-                        'BQX' => 1.6,
-                        'BRD' => 6.4,
-                        'BTC' => 0.001,
-                        'BTG' => 0.001,
-                        'BTM' => 5.0,
-                        'BTS' => 1.0,
-                        'CDT' => 67.0,
-                        'CMT' => 37.0,
-                        'CND' => 47.0,
-                        'CTR' => 5.4,
-                        'DASH' => 0.002,
-                        'DGD' => 0.06,
-                        'DLT' => 11.7,
-                        'DNT' => 51.0,
-                        'EDO' => 2.5,
-                        'ELF' => 6.5,
-                        'ENG' => 2.1,
-                        'ENJ' => 42.0,
-                        'EOS' => 1.0,
-                        'ETC' => 0.01,
-                        'ETF' => 1.0,
-                        'ETH' => 0.01,
-                        'EVX' => 2.5,
-                        'FUEL' => 45.0,
-                        'FUN' => 85.0,
-                        'GAS' => 0,
-                        'GTO' => 20.0,
-                        'GVT' => 0.53,
-                        'GXS' => 0.3,
-                        'HCC' => 0.0005,
-                        'HSR' => 0.0001,
-                        'ICN' => 3.5,
-                        'ICX' => 1.3,
-                        'INS' => 1.5,
-                        'IOTA' => 0.5,
-                        'KMD' => 0.002,
-                        'KNC' => 2.6,
-                        'LEND' => 54.0,
-                        'LINK' => 12.8,
-                        'LLT' => 54.0,
-                        'LRC' => 9.1,
-                        'LSK' => 0.1,
-                        'LTC' => 0.01,
-                        'LUN' => 0.29,
-                        'MANA' => 74.0,
-                        'MCO' => 0.86,
-                        'MDA' => 4.7,
-                        'MOD' => 2.0,
-                        'MTH' => 34.0,
-                        'MTL' => 1.9,
-                        'NAV' => 0.2,
-                        'NEBL' => 0.01,
-                        'NEO' => 0.0,
-                        'NULS' => 2.1,
-                        'OAX' => 8.3,
-                        'OMG' => 0.57,
-                        'OST' => 17.0,
-                        'POE' => 88.0,
-                        'POWR' => 8.6,
-                        'PPT' => 0.25,
-                        'QSP' => 21.0,
-                        'QTUM' => 0.01,
-                        'RCN' => 35.0,
-                        'RDN' => 2.2,
-                        'REQ' => 18.1,
-                        'RLC' => 4.1,
-                        'SALT' => 1.3,
-                        'SBTC' => 1.0,
-                        'SNGLS' => 42,
-                        'SNM' => 29.0,
-                        'SNT' => 32.0,
-                        'STORJ' => 5.9,
-                        'STRAT' => 0.1,
-                        'SUB' => 7.4,
-                        'TNB' => 82.0,
-                        'TNT' => 47.0,
-                        'TRIG' => 6.7,
-                        'TRX' => 129.0,
-                        'USDT' => 23.0,
-                        'VEN' => 1.8,
-                        'VIB' => 28.0,
-                        'VIBE' => 7.2,
-                        'WABI' => 3.5,
-                        'WAVES' => 0.002,
-                        'WINGS' => 9.3,
-                        'WTC' => 0.5,
-                        'XLM' => 0.01,
-                        'XMR' => 0.04,
-                        'XRP' => 0.25,
-                        'XVG' => 0.1,
-                        'XZC' => 0.02,
-                        'YOYOW' => 39.0,
-                        'ZEC' => 0.005,
-                        'ZRX' => 5.7,
-                    ),
-                    'deposit' => array (),
                 ),
             ),
             'commonCurrencies' => array (
@@ -1224,11 +1111,6 @@ class binance extends Exchange {
         }
         $status = $this->parse_transaction_status_by_type ($this->safe_string($transaction, 'status'), $type);
         $amount = $this->safe_float($transaction, 'amount');
-        $feeCost = null;
-        $fee = array (
-            'cost' => $feeCost,
-            'currency' => $code,
-        );
         return array (
             'info' => $transaction,
             'id' => $id,
@@ -1242,7 +1124,7 @@ class binance extends Exchange {
             'currency' => $code,
             'status' => $status,
             'updated' => null,
-            'fee' => $fee,
+            'fee' => null,
         );
     }
 
@@ -1327,16 +1209,23 @@ class binance extends Exchange {
     public function sign ($path, $api = 'public', $method = 'GET', $params = array (), $headers = null, $body = null) {
         $url = $this->urls['api'][$api];
         $url .= '/' . $path;
-        if ($api === 'wapi')
+        if ($api === 'wapi') {
             $url .= '.html';
-        // v1 special case for userDataStream
-        if ($path === 'userDataStream') {
+        }
+        $userDataStream = ($path === 'userDataStream');
+        if ($path === 'historicalTrades') {
+            $headers = array (
+                'X-MBX-APIKEY' => $this->apiKey,
+            );
+        } else if ($userDataStream) {
+            // v1 special case for $userDataStream
             $body = $this->urlencode ($params);
             $headers = array (
                 'X-MBX-APIKEY' => $this->apiKey,
                 'Content-Type' => 'application/x-www-form-urlencoded',
             );
-        } else if (($api === 'private') || ($api === 'wapi' && $path !== 'systemStatus')) {
+        }
+        if (($api === 'private') || ($api === 'wapi' && $path !== 'systemStatus')) {
             $this->check_required_credentials();
             $query = $this->urlencode (array_merge (array (
                 'timestamp' => $this->nonce (),
@@ -1354,8 +1243,13 @@ class binance extends Exchange {
                 $headers['Content-Type'] = 'application/x-www-form-urlencoded';
             }
         } else {
-            if ($params)
-                $url .= '?' . $this->urlencode ($params);
+            // $userDataStream endpoints are public, but POST, PUT, DELETE
+            // therefore they don't accept URL $query arguments
+            // https://github.com/ccxt/ccxt/issues/5224
+            if (!$userDataStream) {
+                if ($params)
+                    $url .= '?' . $this->urlencode ($params);
+            }
         }
         return array ( 'url' => $url, 'method' => $method, 'body' => $body, 'headers' => $headers );
     }

@@ -22,7 +22,7 @@
 
 # ----------------------------------------------------------------------------
 
-__version__ = '1.18.507'
+__version__ = '1.18.630'
 
 # ----------------------------------------------------------------------------
 
@@ -132,9 +132,9 @@ from ccxt.coolcoin import coolcoin                          # noqa: F401
 from ccxt.coss import coss                                  # noqa: F401
 from ccxt.crex24 import crex24                              # noqa: F401
 from ccxt.crypton import crypton                            # noqa: F401
-from ccxt.cryptopia import cryptopia                        # noqa: F401
 from ccxt.deribit import deribit                            # noqa: F401
 from ccxt.dsx import dsx                                    # noqa: F401
+from ccxt.dx import dx                                      # noqa: F401
 from ccxt.ethfinex import ethfinex                          # noqa: F401
 from ccxt.exmo import exmo                                  # noqa: F401
 from ccxt.exx import exx                                    # noqa: F401
@@ -151,6 +151,7 @@ from ccxt.getbtc import getbtc                              # noqa: F401
 from ccxt.hadax import hadax                                # noqa: F401
 from ccxt.hitbtc import hitbtc                              # noqa: F401
 from ccxt.hitbtc2 import hitbtc2                            # noqa: F401
+from ccxt.hollaex import hollaex                            # noqa: F401
 from ccxt.huobipro import huobipro                          # noqa: F401
 from ccxt.huobiru import huobiru                            # noqa: F401
 from ccxt.ice3x import ice3x                                # noqa: F401
@@ -175,9 +176,11 @@ from ccxt.mercado import mercado                            # noqa: F401
 from ccxt.mixcoins import mixcoins                          # noqa: F401
 from ccxt.negociecoins import negociecoins                  # noqa: F401
 from ccxt.nova import nova                                  # noqa: F401
+from ccxt.oceanex import oceanex                            # noqa: F401
 from ccxt.okcoincny import okcoincny                        # noqa: F401
 from ccxt.okcoinusd import okcoinusd                        # noqa: F401
 from ccxt.okex import okex                                  # noqa: F401
+from ccxt.okex3 import okex3                                # noqa: F401
 from ccxt.paymium import paymium                            # noqa: F401
 from ccxt.poloniex import poloniex                          # noqa: F401
 from ccxt.quadrigacx import quadrigacx                      # noqa: F401
@@ -269,9 +272,9 @@ exchanges = [
     'coss',
     'crex24',
     'crypton',
-    'cryptopia',
     'deribit',
     'dsx',
+    'dx',
     'ethfinex',
     'exmo',
     'exx',
@@ -288,6 +291,7 @@ exchanges = [
     'hadax',
     'hitbtc',
     'hitbtc2',
+    'hollaex',
     'huobipro',
     'huobiru',
     'ice3x',
@@ -312,9 +316,11 @@ exchanges = [
     'mixcoins',
     'negociecoins',
     'nova',
+    'oceanex',
     'okcoincny',
     'okcoinusd',
     'okex',
+    'okex3',
     'paymium',
     'poloniex',
     'quadrigacx',

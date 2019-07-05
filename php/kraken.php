@@ -199,6 +199,7 @@ class kraken extends Exchange {
             ),
             'commonCurrencies' => array (
                 'XDG' => 'DOGE',
+                'FEE' => 'KFEE',
             ),
             'options' => array (
                 'cacheDepositMethodsOnFetchDepositAddress' => true, // will issue up to two calls in fetchDepositAddress
@@ -487,18 +488,19 @@ class kraken extends Exchange {
 
     public function fetch_tickers ($symbols = null, $params = array ()) {
         $this->load_markets();
-        $pairs = array ();
-        for ($s = 0; $s < count ($this->symbols); $s++) {
-            $symbol = $this->symbols[$s];
+        $symbols = ($symbols === null) ? $this->symbols : $symbols;
+        $marketIds = array ();
+        for ($i = 0; $i < count ($this->symbols); $i++) {
+            $symbol = $this->symbols[$i];
             $market = $this->markets[$symbol];
-            if ($market['active'])
-                if (!$market['darkpool'])
-                    $pairs[] = $market['id'];
+            if ($market['active'] && !$market['darkpool']) {
+                $marketIds[] = $market['id'];
+            }
         }
-        $filter = implode (',', $pairs);
-        $response = $this->publicGetTicker (array_merge (array (
-            'pair' => $filter,
-        ), $params));
+        $request = array (
+            'pair' => implode (',', $marketIds),
+        );
+        $response = $this->publicGetTicker (array_merge ($request, $params));
         $tickers = $response['result'];
         $ids = is_array ($tickers) ? array_keys ($tickers) : array ();
         $result = array ();
@@ -507,7 +509,9 @@ class kraken extends Exchange {
             $market = $this->markets_by_id[$id];
             $symbol = $market['symbol'];
             $ticker = $tickers[$id];
-            $result[$symbol] = $this->parse_ticker($ticker, $market);
+            if ($this->in_array($symbol, $symbols)) {
+                $result[$symbol] = $this->parse_ticker($ticker, $market);
+            }
         }
         return $result;
     }
@@ -586,10 +590,8 @@ class kraken extends Exchange {
         }
         $time = $this->safe_float($item, 'time');
         $timestamp = null;
-        $datetime = null;
         if ($time !== null) {
             $timestamp = intval ($time * 1000);
-            $datetime = $this->iso8601 ($timestamp);
         }
         $fee = array (
             'cost' => $this->safe_float($item, 'fee'),
@@ -597,6 +599,7 @@ class kraken extends Exchange {
         );
         $before = null;
         $after = $this->safe_float($item, 'balance');
+        $status = 'ok';
         return array (
             'info' => $item,
             'id' => $id,
@@ -609,8 +612,9 @@ class kraken extends Exchange {
             'amount' => $amount,
             'before' => $before,
             'after' => $after,
+            'status' => $status,
             'timestamp' => $timestamp,
-            'datetime' => $datetime,
+            'datetime' => $this->iso8601 ($timestamp),
             'fee' => $fee,
         );
     }
@@ -988,15 +992,19 @@ class kraken extends Exchange {
         );
     }
 
-    public function parse_orders ($orders, $market = null, $since = null, $limit = null) {
+    public function parse_orders ($orders, $market = null, $since = null, $limit = null, $params = array ()) {
         $result = array ();
         $ids = is_array ($orders) ? array_keys ($orders) : array ();
+        $symbol = null;
+        if ($market !== null) {
+            $symbol = $market['symbol'];
+        }
         for ($i = 0; $i < count ($ids); $i++) {
             $id = $ids[$i];
             $order = array_merge (array ( 'id' => $id ), $orders[$id]);
-            $result[] = $this->parse_order($order, $market);
+            $result[] = array_merge ($this->parse_order($order, $market), $params);
         }
-        return $this->filter_by_since_limit($result, $since, $limit);
+        return $this->filter_by_symbol_since_limit($result, $symbol, $since, $limit);
     }
 
     public function fetch_order ($id, $symbol = null, $params = array ()) {

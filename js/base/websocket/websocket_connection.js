@@ -2,6 +2,7 @@
 
 const WebsocketBaseConnection = require ('./websocket_base_connection');
 const WebSocket = require('ws');
+const io = require('socket.io-client');
 
 const { sleep } = require ('../functions')
 
@@ -26,45 +27,94 @@ module.exports = class WebsocketConnection extends WebsocketBaseConnection {
                 ws: null,
                 isClosing: false,
             };
-            if (this.options.agent) {
-                client.ws = new WebSocket(this.options.url, { agent: this.options.agent });
+            if (this.options.url.includes('https://api.hollaex.com/')) {
+                client.ws = io (this.options.url);
+
+                client.ws.on('connect', async () => {
+                    if (this.options['wait-after-connect']) {
+                        await sleep(this.options['wait-after-connect']);
+                    }
+                    this.emit ('open');
+                    resolve();
+                });
+
+                client.ws.on('error', (error) => {
+                    if (!client.isClosing) {
+                        this.emit('err', error);
+                    }
+                    reject(error);
+                });
+
+                client.ws.on('disconnect', () => {
+                    if (!client.isClosing) {
+                        this.emit('close');
+                    }
+                    reject('closing');
+                });
+
+                client.ws.on('orderbook', async (data) => {
+                    if (this.options['verbose']){
+                        console.log("WebsocketConnection: "+data);
+                    }
+
+                    if (!client.isClosing) {
+                        this.emit('message', data, 'ob');
+                    }
+                    resolve();
+                });
+
+                client.ws.on('trades', async (data) => {
+                    if (this.options['verbose']){
+                        console.log("WebsocketConnection: "+data);
+                    }
+
+                    if (!client.isClosing) {
+                        this.emit('message', data, 'trade');
+                    }
+                    resolve();
+                })
+                this.client = client;
             } else {
-                client.ws = new WebSocket(this.options.url);
+                if (this.options.agent) {
+                    client.ws = new WebSocket(this.options.url, { agent: this.options.agent });
+                } else {
+                    client.ws = new WebSocket(this.options.url);
+                }
+
+                client.ws.on('open', async () => {
+                    if (this.options['wait-after-connect']) {
+                        await sleep(this.options['wait-after-connect']);
+                    }
+                    this.emit ('open');
+                    resolve();
+                });
+
+                client.ws.on('error', (error) => {
+                    if (!client.isClosing) {
+                        this.emit('err', error);
+                    }
+                    reject(error);
+                });
+            
+                client.ws.on('close', () => {
+                    if (!client.isClosing) {
+                        this.emit('close');
+                    }
+                    reject('closing');
+                });
+            
+                client.ws.on('message', async (data) => {
+                    if (this.options['verbose']){
+                        console.log("WebsocketConnection: "+data);
+                    }
+
+                    if (!client.isClosing) {
+                        this.emit('message', data);
+                    }
+                    resolve();
+                });
+                this.client = client;
             }
-
-            client.ws.on('open', async () => {
-                if (this.options['wait-after-connect']) {
-                    await sleep(this.options['wait-after-connect']);
-                }
-                this.emit ('open');
-                resolve();
-            });
-
-            client.ws.on('error', (error) => {
-                if (!client.isClosing) {
-                    this.emit('err', error);
-                }
-                reject(error);
-            });
-        
-            client.ws.on('close', () => {
-                if (!client.isClosing) {
-                    this.emit('close');
-                }
-                reject('closing');
-            });
-        
-            client.ws.on('message', async (data) => {
-                if (this.options['verbose']){
-                    console.log("WebsocketConnection: "+data);
-                }
-
-                if (!client.isClosing) {
-                    this.emit('message', data);
-                }
-                resolve();
-            });
-            this.client = client;
         });
     }
 

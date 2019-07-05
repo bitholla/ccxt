@@ -31,6 +31,25 @@ module.exports = class okex extends okcoinusd {
                     'https://www.okex.com/docs/en/',
                 ],
                 'fees': 'https://www.okex.com/pages/products/fees.html',
+                'referral': 'https://www.okex.com',
+            },
+            'fees': {
+                'trading': {
+                    'taker': 0.0015,
+                    'maker': 0.0010,
+                },
+                'spot': {
+                    'taker': 0.0015,
+                    'maker': 0.0010,
+                },
+                'future': {
+                    'taker': 0.0030,
+                    'maker': 0.0020,
+                },
+                'swap': {
+                    'taker': 0.0070,
+                    'maker': 0.0020,
+                },
             },
             'commonCurrencies': {
                 // OKEX refers to ERC20 version of Aeternity (AEToken)
