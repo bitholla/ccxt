@@ -4,7 +4,7 @@
 
 # -----------------------------------------------------------------------------
 
-__version__ = '1.18.918'
+__version__ = '1.18.922'
 
 # -----------------------------------------------------------------------------
 
@@ -66,7 +66,6 @@ from ccxt.async_support.bitforex import bitforex                          # noqa
 from ccxt.async_support.bithumb import bithumb                            # noqa: F401
 from ccxt.async_support.bitkk import bitkk                                # noqa: F401
 from ccxt.async_support.bitlish import bitlish                            # noqa: F401
-from ccxt.async_support.bitmarket import bitmarket                        # noqa: F401
 from ccxt.async_support.bitmex import bitmex                              # noqa: F401
 from ccxt.async_support.bitso import bitso                                # noqa: F401
 from ccxt.async_support.bitstamp import bitstamp                          # noqa: F401
@@ -102,7 +101,6 @@ from ccxt.async_support.coinfloor import coinfloor                        # noqa
 from ccxt.async_support.coingi import coingi                              # noqa: F401
 from ccxt.async_support.coinmarketcap import coinmarketcap                # noqa: F401
 from ccxt.async_support.coinmate import coinmate                          # noqa: F401
-from ccxt.async_support.coinnest import coinnest                          # noqa: F401
 from ccxt.async_support.coinone import coinone                            # noqa: F401
 from ccxt.async_support.coinspot import coinspot                          # noqa: F401
 from ccxt.async_support.cointiger import cointiger                        # noqa: F401
@@ -195,7 +193,6 @@ exchanges = [
     'bithumb',
     'bitkk',
     'bitlish',
-    'bitmarket',
     'bitmex',
     'bitso',
     'bitstamp',
@@ -231,7 +228,6 @@ exchanges = [
     'coingi',
     'coinmarketcap',
     'coinmate',
-    'coinnest',
     'coinone',
     'coinspot',
     'cointiger',
